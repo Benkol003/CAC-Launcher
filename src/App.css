@@ -6,7 +6,6 @@
   font-weight: 400;
   color: #f6f6f6;
   background-color: #2f2f2f;
-
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -121,21 +120,11 @@
 }
 
 .mod-action-btn {
-  background-color: #4CAF50;
-  color: white;
-  border: none;
-  padding: 8px 16px;
-  border-radius: 4px;
-  cursor: pointer;
-  transition: background-color 0.25s;
+  /* Using the reusable .btn styles below */
 }
 
-.mod-action-btn:hover {
-  background-color: #45a049;
-}
-
-.mod-action-btn:active {
-  background-color: #3c9c42;
+.dlc-action-btn {
+  /* Using the reusable .btn styles below */
 }
 
 /* Settings Popup */
@@ -213,17 +202,16 @@
   .container {
     flex-direction: row;
   }
-
   .div1 {
     width: 250px;
     height: 100vh;
     position: fixed;
   }
-
   .div2 {
     margin-left: 250px;
   }
 }
+
 /* Reusable Button Styles */
 .btn {
   background-color: #4CAF50;

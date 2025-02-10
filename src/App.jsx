@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
+/*
 // Fetch the Microsoft access token from the backend.
 const getAccessToken = async () => {
   try {
@@ -12,6 +13,8 @@ const getAccessToken = async () => {
     return null;
   }
 };
+*/
+
 
 function App() {
   // State declarations.
@@ -45,7 +48,7 @@ function App() {
   // Fetch players for a given server.
   const fetchPlayers = async (ip, port) => {
     try {
-      const players = await invoke("get_server_players", { ip, port });
+      const players = await invoke("get_server_status", { ip, port });
       setPlayerList(players);
     } catch (err) {
       setError("Error fetching players.");
@@ -104,7 +107,7 @@ function App() {
     <main className="container">
       {/* Left Sidebar: Server List */}
       <div className="div1">
-        <img src="/logo-transparent-svg.svg" className="logo react" alt="Logo" />
+        <img src="/cac_logo.gif" className="logo react" alt="Logo" />
         <h1>Server List</h1>
         <div className="servers">
           {error && <p className="error">{error}</p>}

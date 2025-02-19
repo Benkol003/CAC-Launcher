@@ -107,7 +107,7 @@ function App() {
     <main className="container">
       {/* Left Sidebar: Server List */}
       <div className="div1">
-        <img src="/cac_logo.gif" className="logo react" alt="Logo" />
+        <img src="/cac_logo_transparent.gif" className="logo react" alt="Logo" />
         <h1>Server List</h1>
         <div className="servers">
           {error && <p className="error">{error}</p>}

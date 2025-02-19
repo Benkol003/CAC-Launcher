@@ -1,12 +1,16 @@
 mod secret;
-
 mod msgraph {
-    use urlencoding;
     use std::collections::HashMap;
+    
+
+    use urlencoding;
+
     use serde::Deserialize;
     use base64::{self, prelude::BASE64_STANDARD_NO_PAD,Engine};
 
     use reqwest::{get, header::{CONTENT_TYPE, HOST}};
+
+    
 
     use crate::secret;
 
@@ -65,9 +69,65 @@ pub fn login() -> Result<bool,reqwest::Error> {
  }
 }
 
-fn main() {
-    println!("Hello, world!");
-    msgraph::login();
+
+use std::error::Error;
+
+use reqwest::header;
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"; //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
+
+fn url_download(url: &str) -> Result<bool,Box<dyn Error>> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("user-agent",USER_AGENT.parse()?);
+    let client = reqwest::blocking::Client::builder().default_headers(headers).build()?;
+
+    //reqwest::redirect 's done automatically
+    let response = client.get(url).send()?;
+    if !response.status().is_success(){
+        println!("failed to fetch url {} - HTTP error {}: {}",url,response.status().as_str(),response.text()?);
+        return Ok(false);
+    }
+    println!("successful redirects");
+
+    let download_url = url.replace("onedrive.aspx", "download.aspx").replace("?id=","?SourceUrl=");
+    println!("new download url: {}",download_url);
+    let response = client.get(download_url).send()?;
+    let size: &str;
+    match response.headers().get(reqwest::header::CONTENT_LENGTH) {
+        Some(sz) => {
+            size=sz.to_str()?; println!("file download size: {}",sz.to_str()?);
+        }
+        None => {
+            println!("file download size unknown");
+            return Ok(false);
+        }
+    }
+    
+    //filename
+    let filename: &str;
+    println!("response keys: {}",response.headers().keys().len());
+    match response.headers().get(reqwest::header::CONTENT_DISPOSITION) {
+        None => {
+            println!("failed to get filename"); 
+            return Ok(false);
+            
+        }
+        Some(v) => {
+            filename = v.to_str()?;
+            println!("filename: {}",filename);
+        }
+    }
+
+    return Ok(false);
+}
+
+fn url_download_partial(url: String) -> Result<bool,reqwest::Error> {
+
+    return Ok(false);
+}
+
+fn main() -> Result<(), Box<dyn Error>> {
+    url_download("https://tinyurl.com/26h79782")?;
+    Ok(())
 }
 
 

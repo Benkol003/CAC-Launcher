@@ -19,7 +19,6 @@ mod msgraph {
     }
 
     const TENANT_ID: &str = "4fd01353-8fd7-4a18-a3a1-7cd70f528afa";
-    //const KEY: &str = "YOUR-SECRET-KEY"; //or use secret.rs 
     const APP_CLIENT_ID: &str = "9ecaa0e8-9caf-4f49-94e8-8430bbf57486";
 
     #[derive(Deserialize)]

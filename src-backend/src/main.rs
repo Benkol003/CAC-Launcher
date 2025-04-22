@@ -1,151 +1,106 @@
 #![allow(warnings)] //for debugging only, RM
 
-mod secret;
-mod msgraph {
-    use std::collections::HashMap;
-    
+use std::{default, fmt::Debug, path::Path, str::FromStr, sync::Arc, time::SystemTime, usize};
+use anyhow::{anyhow,Error};
+use base64::display;
+use reqwest::{blocking::{Client, Request, Response}, header, redirect::Policy,Url};
+use reqwest_cookie_store::{CookieStore, CookieStoreMutex, CookieStoreRwLock};
+use stopwatch::Stopwatch;
+use tokio_util::sync::CancellationToken;
 
-    use urlencoding;
+//app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
+const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
 
-    use serde::Deserialize;
-    use base64::{self, prelude::BASE64_STANDARD_NO_PAD,Engine};
-
-    use reqwest::{get, header::{CONTENT_TYPE, HOST}};
-
-    
-
-    use crate::secret;
-
-    fn urlencode<'a>(s: &'a str) -> String {
-        return urlencoding::encode(s).into_owned();
-    }
-
-    const TENANT_ID: &str = "4fd01353-8fd7-4a18-a3a1-7cd70f528afa";
-    const APP_CLIENT_ID: &str = "9ecaa0e8-9caf-4f49-94e8-8430bbf57486";
-    //const MSGPRAPH_KEY - place in secrets.rs
-    
-    #[derive(Deserialize)]
-    struct TokenResponse{
-        token_type : String,
-        expires_in: usize,
-        ext_expires_in: usize,
-        access_token: String
-    }
-
-pub fn getDriveItem(token: &str, url: &str) -> () {
-    let client = reqwest::blocking::Client::new();
-    //let mut params = HashMap::new();
-    
-    let _ = BASE64_STANDARD_NO_PAD.encode(url.as_bytes());
-    
+struct DownloadInfo {
+        sessionUrl: Url,
+        downloadUrl: Url,
+        filename: String,
+        fileSize: usize,
+        etag: String,
 }
 
-//todo switch to using a certificate to really overkill things
-pub fn login() -> Result<bool,reqwest::Error> {
+//download until finished or canceelled. If file exists at path then resumes a partial download.
+async fn download_file(info: DownloadInfo,path: &Path,canceller: CancellationToken) -> Result<(),Error> {
+    let do_partial = Path::exists(path);
 
-    let client = reqwest::blocking::Client::new();
-    //get an access token
-    let mut params = HashMap::new();
-    params.insert("client_id",APP_CLIENT_ID);
-    params.insert("scope","https://graph.microsoft.com/.default");
-    params.insert("client_secret",secret::MSGRAPH_KEY);
-    params.insert("grant_type","client_credentials");
-
-    let response = client.post(format!("https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token"))
-    .header(HOST, "login.microsoftonline.com")
-    .header(CONTENT_TYPE,"application/x-www-form-urlencoded")
-    .form(&params)
-    .send()?;
-
-    if response.status().is_success() {
-        //println!("access token: {}",response.text().as_ref()?);
-        let json: TokenResponse = response.json()?;
-        println!("(type: {}) access token: {}",json.token_type,json.access_token);
-    }else{
-        println!("failed to get access token. status code: {}",response.status().as_str());
-        println!("{}",response.text()?);
-        return Ok(false)
-    }
-
-    return Ok(false);        
- }
+    return Ok(());
 }
 
+//using reqwest
+fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<DownloadInfo,Error> {
 
-use std::error::Error;
-
-use reqwest::{header, redirect::Policy};
-const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0"; //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
-
-fn url_download(url: &str) -> Result<bool,Box<dyn Error>> {
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("user-agent",USER_AGENT.parse()?);
-    let client = reqwest::blocking::Client::builder().cookie_store(true).default_headers(headers).redirect(Policy::none()).build()?;
-
-    //resolve tinyurl to underlying sharepoint url
-    let response = client.get(url).send()?;
-    if !response.status().is_redirection(){
-        println!("redirection failed. HTTP status {}",response.status().as_str());
-        return Ok(false);
+    //make sure to clear out FedAuth cookie so it doesnt break stuff
+    {
+        let mut jarlock = ctx.jar.write().unwrap();
+        jarlock.clear();
     }
-    let sharepoint_url = response.headers().get("Location").unwrap().to_str()?;
-    println!("redirect 1: {}",sharepoint_url);
 
-    //one-time use sharepoint url (associated with cookies from previous redirect)
-    let response = client.get(sharepoint_url).send()?;
-    if !response.status().is_redirection(){
-        println!("redirection failed. HTTP status {}",response.status().as_str());
-        return Ok(false);
+    //resolve tinyurl to underlying sharepoint url and to get session cookies
+    let mut clock = Stopwatch::start_new();
+    let response = ctx.client.get(url.clone()).send()?;
+    clock.stop();
+    println!("v1 time: {}ms",clock.elapsed_ms());
+    let once_url = response.url().as_str();
+    let mut session_cookies = response.cookies();
+
+    let download_url: Url = once_url.replace("onedrive.aspx", "download.aspx").replace("?id=","?SourceUrl=").parse()?;
+
+    //FedAuth session key is needed from the original link for the direct download link to work. 
+    match session_cookies.find(|c| c.name()=="FedAuth"){
+        Some(_) => {},
+        None => {return Err(anyhow!("Did not find FedAuth session cookie")); }
     }
-    let once_url = response.headers().get("Location").unwrap().to_str()?;
-    println!("redirect 2: {}",once_url);
-
-    let download_url = once_url.replace("onedrive.aspx", "download.aspx").replace("?id=","?SourceUrl=");
-    println!("new download url: {}",download_url.as_str());
 
     //redirect to download 
-    let response = client.get(&download_url).send()?;
+    let response = ctx.client.head(download_url.clone()).send()?;
     if !response.status().is_success(){
-        println!("failed to fetch url {} - HTTP error {}: {}",&download_url,response.status().as_str(),response.text()?);
-        return Ok(false);
+        return Err(anyhow!("failed to fetch url {} - HTTP error {}: {}",&download_url,response.status().as_str(),response.text()?));
     }
+    let file_size = match response.headers().get(reqwest::header::CONTENT_LENGTH) {
+        Some(sz) => sz.to_str()?.parse()?,
+        None => return Err(anyhow!("file download size unknown"))
+    };
 
-    let size: &str;
-    match response.headers().get(reqwest::header::CONTENT_LENGTH) {
-        Some(sz) => {
-            size=sz.to_str()?; println!("file download size: {}",sz.to_str()?);
-        }
-        None => {
-            println!("file download size unknown");
-            return Ok(false);
-        }
-    }
-    
+    let etag = match response.headers().get(reqwest::header::ETAG){
+        Some(e) => e.to_str()?.to_string().replace("\"", ""),
+        None => return Err(anyhow!("failed to get ETag for download file"))
+    };
+
     //filename
-    let filename: String;
-    match response.headers().get(reqwest::header::CONTENT_DISPOSITION) {
-        None => {
-            println!("failed to get filename"); 
-            return Ok(false);
-            
-        }
-        Some(v) => {
-            let filename = v.to_str()?.replace("\"", "");
-            println!("filename: {}",&filename);
-        }
-    }
-
-    return Ok(false);
+    let filename = match response.headers().get(reqwest::header::CONTENT_DISPOSITION) {
+        None => return Err(anyhow!("failed to get filename")),
+        Some(v) => v.to_str()?.split("filename=").last().ok_or(anyhow!("failed to get filename"))?.replace("\"", "")
+    };
+    return Ok(DownloadInfo{etag: etag, sessionUrl: url.clone(), downloadUrl: download_url, filename: filename, fileSize: file_size})
 }
 
-fn url_download_partial(url: String) -> Result<bool,reqwest::Error> {
-
-    return Ok(false);
+struct ClientCtx {
+    client: Client,
+    jar: Arc<CookieStoreRwLock>
 }
 
-fn main() -> Result<(), Box<dyn Error>> {
-    //msgraph::login();
-    url_download("https://tinyurl.com/26h79782")?;
+fn main() -> Result<(), Error> {
+    let mut headers = reqwest::header::HeaderMap::new();
+    headers.insert("user-agent",USER_AGENT.parse()?);
+
+    let jar = Arc::new(CookieStoreRwLock::new(CookieStore::new(None)));
+    let clientCtx = ClientCtx{
+        client: reqwest::blocking::Client::builder()
+        .cookie_provider(jar.clone())
+        .default_headers(headers)
+        .redirect(Policy::limited(10))
+        .use_native_tls()
+        .build()?,
+        jar: jar
+    };
+  
+    let url = "https://tinyurl.com/4hznh2sa";
+    let url = "https://0jz1q-my.sharepoint.com/:u:/g/personal/brenner650_0jz1q_onmicrosoft_com/ER8foAfRn8BPp_AqMlDVJNoBlOn17yHic_ixZNbwKWOlng?e=gGBEge";
+    let info = get_download_info(&clientCtx,Url::from_str(url)?,&Path::new("./tmp/"))?;
+    println!("etag: {}",info.etag);
+    println!("filename: {}",info.filename);
+
+    
     Ok(())
 }
 

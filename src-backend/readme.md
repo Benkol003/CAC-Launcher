@@ -13,3 +13,6 @@ resource at a link changes i.e. to detect a mod version change
 
 ### MSGraph API
 The 'official' way to download files. WIP
+
+### TODO
+what MSVC redists are needed to install with the base game

@@ -1,3 +1,5 @@
+cargo-features = ["profile-rustflags"]
+
 [package]
 name = "src-backend"
 version = "0.1.0"
@@ -22,9 +24,14 @@ xxhash-rust = { version = "0.8.15", features = ["xxh3"] }
 
 [profile.dev]
 incremental = true 
+target-cpu = "native"
+rustflags = ["-C", "target-feature=+sse,+sse2,+avx,+avx2"]
+
 
 [profile.release]
 codegen-units = 1
 lto = true
 opt-level = 3
 strip = true
+target-cpu = "native"
+rustflags = ["-C", "target-feature=+sse,+sse2,+avx,+avx2"]

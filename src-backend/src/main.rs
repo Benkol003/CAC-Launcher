@@ -86,7 +86,7 @@ mod dirhash;
 
 fn main() -> Result<(), Error> {
 
-    let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods\\@ace");
+    let path = Path::new("C:\\Users\\benk\\git\\novus2-old\\novus2");
     let mut clock = Stopwatch::start_new();
     println!("{} hash: {}",path.to_string_lossy(),dirhash::hash_directory(path)?.to_string());
     clock.stop();

@@ -5,7 +5,7 @@ use jwalk::WalkDir;
 use memmap2::Mmap;
 use rayon::prelude::*;
 use stopwatch::Stopwatch;
-use xxhash_rust::xxh3;
+use xxhash_rust::xxh3::{self, xxh3_128, xxh3_64};
 
 pub fn hash_directory(path: &Path) -> Result<u128,Error>{
 
@@ -21,21 +21,14 @@ pub fn hash_directory(path: &Path) -> Result<u128,Error>{
     })
     .for_each(|entry| {
         let path = entry.unwrap().path();
-        
-        //let mut hasher = blake3::Hasher::new();
-        let mut hasher = xxhash_rust::xxh3::Xxh3Default::new(); //this is really slow on debug builds, but maybe slightly faster? than blake3 on release
-        
         let path_str: String = path.clone().into_os_string().into_string().unwrap();
 
         let mut file = File::open(path).unwrap();
     
         let mmap = unsafe { Mmap::map(&file).unwrap() };
-        hasher.update(&mmap);
-
+        let hash = xxh3_128(&mmap); //TODO benchmark against twox_hash
         let mut lock = hashTable.lock().unwrap();
-
-        //lock.push((path_str,hasher.finalize().to_string()));
-        lock.push((path_str,hasher.digest128()));
+        lock.push((path_str,hash));
         
     });
 
@@ -47,8 +40,8 @@ pub fn hash_directory(path: &Path) -> Result<u128,Error>{
     lock.sort_by_key(|i| i.1);
     
     let mut hasher = xxhash_rust::xxh3::Xxh3Default::new();
-    for hash in lock.iter(){
-        hasher.update(&hash.1.to_le_bytes());
+    for hash in lock.iter().map(|i| i.1){
+        hasher.update(&hash.to_le_bytes());
     }
     return Ok(hasher.digest128());
 }

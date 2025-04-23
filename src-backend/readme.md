@@ -12,7 +12,8 @@ resource at a link changes i.e. to detect a mod version change
 - Onedrive links are very slow - about 1000ms response time. This is the fault of the server and not this application. MSGraph API could possibly be faster.
 
 ### MSGraph API
-The 'official' way to download files. WIP
+The 'official' way to download files.
+Each API request takes about 800ms.
 
 ### TODO
 what MSVC redists are needed to install with the base game

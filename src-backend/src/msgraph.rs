@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use anyhow::{anyhow,Error};
+use stopwatch::Stopwatch;
 use urlencoding;
 
 use serde::Deserialize;
@@ -8,6 +9,8 @@ use base64::{self, prelude::{BASE64_STANDARD_NO_PAD, BASE64_URL_SAFE_NO_PAD},Eng
 use reqwest::{blocking::{get,Client}, header::{self, HeaderMap, CONTENT_TYPE, HOST}, Version};
 
 use crate::secrets;
+
+//the application needs File.ReadWrite permissions granted for it to work in entra admin center. these can only be granted by an admin.
 
 const TENANT_ID: &str = "4fd01353-8fd7-4a18-a3a1-7cd70f528afa";
 const APP_CLIENT_ID: &str = "9ecaa0e8-9caf-4f49-94e8-8430bbf57486";
@@ -23,7 +26,14 @@ struct TokenResponse{
     access_token: String
 }
 
-pub fn getDriveItem(client: &Client, token: &str, url: &str) -> Result<(),Error> {
+#[derive(Deserialize,Debug)]
+struct sharedDriveItem {
+    id: String,
+    name: String,
+    owner: String,
+}
+
+pub fn getSharedDriveItem(client: &Client, token: &str, url: &str) -> Result<(),Error> {
 let client = reqwest::blocking::Client::new();
 //let mut params = HashMap::new();
 
@@ -35,14 +45,16 @@ println!("encoded url: {encodedShareUrl}");
     headers.append("prefer","redeemSharingLink".parse()?);
 
     let msapi_url = "https://graph.microsoft.com/v1.0/";
-
-    let response = client.get(format!("{}shares/{}/",msapi_url,encodedShareUrl)).headers(headers).send()?;
+    let mut clock = Stopwatch::start_new();
+    let response = client.get(format!("{}shares/{}/driveItem",msapi_url,encodedShareUrl)).headers(headers).send()?;
+    clock.stop();
+    println!("getSharedDriveItem response time: {}ms",clock.elapsed_ms());
     if(response.status().as_u16() != 200) {
         return Err(anyhow!("http error - code {}, text: {}",response.status().as_u16(),response.text()?));
     }
 
-    let sharedDriveItem = response.text()?;
-    println!("sharedDriveItem:\n{sharedDriveItem}");
+    let sharedDriveItem: String = response.text()?;
+    //println!("sharedDriveItem:\n{sharedDriveItem}");
 
     return Ok(());
 }

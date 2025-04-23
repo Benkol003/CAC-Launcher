@@ -8,6 +8,8 @@ use reqwest_cookie_store::{CookieStore, CookieStoreMutex, CookieStoreRwLock};
 use stopwatch::Stopwatch;
 use tokio_util::sync::CancellationToken;
 
+mod secrets;
+
 //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
 
@@ -79,7 +81,18 @@ struct ClientCtx {
     jar: Arc<CookieStoreRwLock>
 }
 
+mod msgraph;
+mod dirhash;
+
 fn main() -> Result<(), Error> {
+
+    let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods\\@ace");
+    let mut clock = Stopwatch::start_new();
+    println!("{} hash: {}",path.to_string_lossy(),dirhash::hash_directory(path)?.to_string());
+    clock.stop();
+    println!("hash time: {}ms",clock.elapsed_ms());
+    return Ok(());
+
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert("user-agent",USER_AGENT.parse()?);
 
@@ -96,10 +109,15 @@ fn main() -> Result<(), Error> {
   
     let url = "https://tinyurl.com/4hznh2sa";
     let url = "https://0jz1q-my.sharepoint.com/:u:/g/personal/brenner650_0jz1q_onmicrosoft_com/ER8foAfRn8BPp_AqMlDVJNoBlOn17yHic_ixZNbwKWOlng?e=gGBEge";
+
     let info = get_download_info(&clientCtx,Url::from_str(url)?,&Path::new("./tmp/"))?;
     println!("etag: {}",info.etag);
     println!("filename: {}",info.filename);
 
+    // let token = msgraph::login(&clientCtx.client)?;
+    // while(true){
+    //     msgraph::getSharedDriveItem(&clientCtx.client, token.as_str(), url)?;
+    // }
     
     Ok(())
 }

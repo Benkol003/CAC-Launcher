@@ -94,7 +94,7 @@ fn main() -> Result<(), Error> {
     //dirhash
     let args: Vec<String> = env::args().collect();
     let p = Path::new(args[1].as_str());
-    dirhash::build_dir_manifest(&p,&Path::new("CAC-config/manifest.json"));
+    dirhash::build_dir_manifest(&p,&Path::new("CAC-config/hashes.json"));
     return Ok(());
 
     //let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods\\@ace");

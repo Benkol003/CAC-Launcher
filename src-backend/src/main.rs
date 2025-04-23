@@ -1,6 +1,6 @@
 #![allow(warnings)] //for debugging only, RM
 
-use std::{default, fmt::Debug, path::Path, str::FromStr, sync::Arc, time::SystemTime, usize};
+use std::{sync::Mutex,default, env, fmt::Debug, io::Write, path::Path, str::FromStr, sync::Arc, time::SystemTime, usize};
 use anyhow::{anyhow,Error};
 use base64::display;
 use reqwest::{blocking::{Client, Request, Response}, header, redirect::Policy,Url};
@@ -9,6 +9,9 @@ use stopwatch::Stopwatch;
 use tokio_util::sync::CancellationToken;
 
 mod secrets;
+
+
+use jwalk::WalkDir;
 
 //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
@@ -84,15 +87,24 @@ struct ClientCtx {
 mod msgraph;
 mod dirhash;
 
-fn main() -> Result<(), Error> {
 
-    let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods");
-    let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods\\@CUPTerrainsCore");
-    let mut clock = Stopwatch::start_new();
-    println!("{} hash: {}",path.to_string_lossy(),dirhash::hash_directory(path)?.to_string());
-    clock.stop();
-    println!("hash time: {}ms",clock.elapsed_ms());
+
+
+fn main() -> Result<(), Error> {
+    //dirhash
+    let args: Vec<String> = env::args().collect();
+    let p = Path::new(args[1].as_str());
+    dirhash::build_dir_manifest(&p,&Path::new("CAC-config/manifest.json"));
     return Ok(());
+
+    //let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods\\@ace");
+    //let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods");
+    //let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods\\@CUPTerrainsMaps"); 
+    
+    // let mut clock = Stopwatch::start_new();
+    // println!("{} hash: {}",path.to_string_lossy(),dirhash::hash_directory(path)?.to_string());
+    // clock.stop();
+    // println!("hash time: {}ms",clock.elapsed_ms());
 
     let mut headers = reqwest::header::HeaderMap::new();
     headers.insert("user-agent",USER_AGENT.parse()?);

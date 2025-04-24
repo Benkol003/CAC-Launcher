@@ -15,5 +15,8 @@ resource at a link changes i.e. to detect a mod version change
 The 'official' way to download files.
 Each API request takes about 800ms.
 
+### VS Code
+- advised to set `"rust-analyzer.cachePriming.enable": false` in settings.json to speed up opening the project
+
 ### TODO
 what MSVC redists are needed to install with the base game

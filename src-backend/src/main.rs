@@ -25,6 +25,7 @@ struct DownloadInfo {
 }
 
 //download until finished or canceelled. If file exists at path then resumes a partial download.
+//assume client is in a state that it has the neccesary cookies to use the download url
 async fn download_file(info: DownloadInfo,path: &Path,canceller: CancellationToken) -> Result<(),Error> {
     let do_partial = Path::exists(path);
 
@@ -94,7 +95,7 @@ fn main() -> Result<(), Error> {
     //dirhash
     let args: Vec<String> = env::args().collect();
     let p = Path::new(args[1].as_str());
-    dirhash::build_dir_manifest(&p,&Path::new("CAC-config/hashes.json"));
+    dirhash::build_dir_manifest(&p,&Path::new("CAC-config/hashes.json"))?;
     return Ok(());
 
     //let path = Path::new("D:\\SteamLibrary\\steamapps\\common\\Arma 3\\Mods\\@ace");

@@ -1,5 +1,5 @@
 <p align="center">
-    <img src="https://raw.githubusercontent.com/Benkol003/CAC-GUI/master/public/cac_logo_transparent.png" alt="CAC logo" style="border-radius: 10px; border: solid 5px #2222ffa0;">
+    <img src="https://raw.githubusercontent.com/Benkol003/CAC-GUI/master/public/cac_logo-transparent.png" alt="CAC logo" >
 </p>
 <p align="center">
     <a href="https://discord.gg/5e8crrDd">

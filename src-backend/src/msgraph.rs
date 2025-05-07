@@ -1,3 +1,10 @@
+#![allow(unused_variables)]
+#![allow(unreachable_code)]
+#![allow(unused_imports)]
+#![allow(unused_import_braces)]
+
+#![allow(warnings)]
+
 use std::collections::HashMap;
 use anyhow::{anyhow,Error};
 use stopwatch::Stopwatch;
@@ -33,7 +40,7 @@ struct sharedDriveItem {
     owner: String,
 }
 
-pub fn getSharedDriveItem(client: &Client, token: &str, url: &str) -> Result<(),Error> {
+pub fn get_shared_drive_item(client: &Client, token: &str, url: &str) -> Result<(),Error> {
 let client = reqwest::blocking::Client::new();
 //let mut params = HashMap::new();
 

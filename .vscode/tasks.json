@@ -1,0 +1,23 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "rust test",
+			"type": "shell",
+			"problemMatcher": "$rustc",
+			"command": "cargo",
+			"args": [
+				"test",
+				"--",
+				"--nocapture"
+			],
+			"options": {
+				"cwd": "${workspaceRoot}/src-backend"
+			},
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			}
+		}
+	]
+}

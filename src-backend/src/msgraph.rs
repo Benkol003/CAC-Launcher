@@ -40,7 +40,7 @@ struct sharedDriveItem {
     owner: String,
 }
 
-pub fn get_shared_drive_item(client: &Client, token: &str, url: &str) -> Result<(),Error> {
+pub fn get_shared_drive_item(client: &Client, token: &str, url: &str) -> Result<serde_json::Value,Error> {
 let client = reqwest::blocking::Client::new();
 //let mut params = HashMap::new();
 
@@ -59,11 +59,9 @@ println!("encoded url: {encodedShareUrl}");
     if(response.status().as_u16() != 200) {
         return Err(anyhow!("http error - code {}, text: {}",response.status().as_u16(),response.text()?));
     }
-
-    let sharedDriveItem: String = response.text()?;
     //println!("sharedDriveItem:\n{sharedDriveItem}");
 
-    return Ok(());
+    return Ok(response.json()?);
 }
 
 //not valid for app token / us TODO REMOVE

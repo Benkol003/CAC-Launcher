@@ -5,9 +5,13 @@
 
 #![allow(warnings)]
 
+/// utilities for interacting with the [msgraph api](https://learn.microsoft.com/en-us/graph/use-the-api) for downloading content.
+/// Note: the application needs File.ReadWrite permissions granted for it to work in entra admin center. these can only be granted by an admin.
 pub mod msgraph;
-pub mod dirhash;
+///define the app's secrets here such as the msgraph key.
 pub mod secrets;
+///utilities for verifying downloaded mods.
+pub mod dirhash;
 
 use std::{sync::Mutex,default, env, fmt::Debug, io::Write, path::Path, str::FromStr, sync::Arc, time::SystemTime, usize};
 use anyhow::{anyhow,Error};

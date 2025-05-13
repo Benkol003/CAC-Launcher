@@ -5,9 +5,10 @@
 #![allow(warnings)]
 
 use anyhow::{ anyhow, Error };
+use indicatif::ProgressBar;
 use serde_json::map::Entry;
 use serde::{ Deserialize };
-use std::{ collections::HashMap, io::Read };
+use std::{ collections::HashMap, fmt::Debug, io::{Read, Write}, path::Path };
 use stopwatch::Stopwatch;
 use urlencoding;
 
@@ -21,8 +22,6 @@ use reqwest::{
 };
 
 use crate::secrets;
-
-//the application needs File.ReadWrite permissions granted for it to work in entra admin center. these can only be granted by an admin.
 
 const TENANT_ID: &str = "4fd01353-8fd7-4a18-a3a1-7cd70f528afa";
 const APP_CLIENT_ID: &str = "9ecaa0e8-9caf-4f49-94e8-8430bbf57486";
@@ -79,11 +78,13 @@ pub enum FsEntryType {
     Folder {child_count: usize},
 }
 
+
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0&tabs=http)
-pub fn get_encoded_sharing_url(client: &Client, url: Url) -> Result<String, Error> {
+fn get_encoded_sharing_url(client: &Client, url: &str) -> Result<String, Error> {
     let response = client.get(url).send()?;
-    let final_url = response.url();
-    return Ok(format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(final_url.as_str())));
+    let final_url = response.url().as_str();
+    println!("final url: {}",final_url);
+    return Ok(format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(final_url)));
 }
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0&tabs=http)
@@ -95,15 +96,14 @@ pub fn get_shared_drive_item(
     let client = reqwest::blocking::Client::new();
     //let mut params = HashMap::new();
 
-    let share_id = format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(url.as_bytes()));
-    println!("encoded url: {share_id}");
+    let share_id = get_encoded_sharing_url(&client,&url)?;
     let mut headers = HeaderMap::new();
     headers.append(header::AUTHORIZATION, format!("Bearer {}", token).parse()?);
     headers.append(header::CONTENT_TYPE, "application/json".parse()?);
     headers.append("prefer", "redeemSharingLink".parse()?);
     let mut response = client
         .get(format!("{}shares/{}/driveItem", MSAPI_URL, share_id))
-        .headers(headers.clone())
+        .headers(headers)
         .send()?;
     if response.status().as_u16() != 200 {
         return Err(
@@ -111,34 +111,48 @@ pub fn get_shared_drive_item(
         );
     }
 
-    let body = client
-        .get(format!("{}shares/{}/driveItem", MSAPI_URL, share_id))
-        .headers(headers)
-        .send()?
-        .text()?;
-    println!("response: \n{}", body);
-
-    return Ok(response.json()?);
+    let mut ret: SharedDriveItem = response.json()?;
+    ret.share_id = share_id;
+    return Ok(ret);
 }
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0&tabs=http)
-pub fn download_item(client: &Client, token: &str, url: &str) -> Result<(), Error> {
-    let encodedShareUrl = format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(url.as_bytes()));
+pub fn download_item(client: &Client, token: &str, item: &SharedDriveItem,dest_folder: &str) -> Result<(), Error> {
+    let dest_folder = Path::new(dest_folder);
+    std::fs::create_dir_all(dest_folder)?;
+    let mut file =  std::fs::File::create(dest_folder.join(item.name.clone()))?;
+    let progress = ProgressBar::new(item.size as u64);//TODO static assert usize::MAX<= u64::MAX
+    progress.set_message(format!("Downloading {}",item.name)); 
+
+    //cd "" == cd "./"
     let mut headers = HeaderMap::new();
     headers.append(header::AUTHORIZATION, format!("Bearer {}", token).parse()?);
 
-    let response = client
-        .get(format!("{}shares/{}/driveItem/content", MSAPI_URL, encodedShareUrl))
+    // TODO test: does this block until the entire file has been downloaded
+    let mut response = client
+        .get(format!("{}shares/{}/driveItem/content", MSAPI_URL, item.share_id))
         .headers(headers)
         .send()?;
 
-    println!("response code: {}", response.status());
-    println!("response : {}", response.bytes()?.len());
+    if(!response.status().is_success()) {
+        return Err(anyhow!("download URL HTTP error: {}",response.status().as_str()));
+    }
 
+    //assuming 4K buffer is best for IO TODO 
+    const BLOCK_SIZE: usize = 4096;
+    let mut buf : [u8; BLOCK_SIZE] = [0;BLOCK_SIZE];
+    let mut readBytes : usize;
+    while(true){
+        readBytes = response.read(&mut buf)?;
+        if(readBytes==0) {break;}
+        file.write(&buf[..readBytes])?;
+        progress.inc(BLOCK_SIZE as u64);
+    }
+    progress.finish();
     Ok(())
 }
 
-///[msgraph reference](https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token)
+///[msgraph reference](https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token)\
 ///TODO: switch to using a certificate
 pub fn login(client: &Client) -> Result<String, Error> {
     //get an access token

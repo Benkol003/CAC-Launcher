@@ -1,0 +1,1 @@
+the makefile building 7z needs to be run from the correct folder as the 7z makefiles use relative paths that only work this way, and i want to be able to keep this update-compatible

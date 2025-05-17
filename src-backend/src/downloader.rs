@@ -1,14 +1,13 @@
-use std::fs::OpenOptions;
-use std::io::Read;
-
+use std::{fmt::format, fs::{self, File}, io::{Read, Write}};
+use std::process::{Command, Stdio};
 use anyhow::{anyhow, Error};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
-use ripunzip::*;
+use colored::Colorize;
 
-use reqwest::Url;
 use src_backend::*;
-use src_backend::msgraph::FsEntryType;
+
+static Z7_EXE: &[u8] = include_bytes!("7za.exe");
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -28,29 +27,15 @@ struct ArgsGroup {
     url: Option<String>,
 }
 
-struct UnzipProgresshandler<'a> {
-    progress_bar: &'a ProgressBar
-}
-impl<'a> UnzipProgressReporter for UnzipProgresshandler<'a> {
-
-    fn extraction_starting(&self, _display_name: &str) { 
-        self.progress_bar.reset();
-    }
-    fn extraction_finished(&self, _display_name: &str) {
-        self.progress_bar.finish();
-     }
-    fn total_bytes_expected(&self, _expected: u64) {
-        self.progress_bar.set_length(_expected);
-     }
-    fn bytes_extracted(&self, _count: u64) {
-        self.progress_bar.set_position(_count);
-     }
-}
-
 //TODO remove duplicates
-const PROGRESS_STYLE: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
-
 fn main() -> Result<(),Error> {
+
+    //unpack z7
+    {
+        let mut z7 = File::create("7za.exe")?;
+        z7.write_all(Z7_EXE).map_err(|_| anyhow!("failed to unpack 7za.exe"))?;
+    }
+
     let args = Args::parse();
     let ctx = build_client_ctx()?;
     let token = msgraph::login(&ctx.client)?;
@@ -72,31 +57,28 @@ fn main() -> Result<(),Error> {
         let item = msgraph::get_shared_drive_item(&ctx.client, &token, &url)?;
         msgraph::download_item(&ctx.client, &token, &item, "./")?;
 
-        //TODO: can potentially directly unzip from the download link with from_uri
-        match item.name.rsplit_once('.'){
-            None => {},
-            Some(tuple) => {
-                let ext = tuple.1.to_ascii_lowercase();
-                if ext=="7z" || ext=="zip" {
-                    let zfile = std::fs::File::open(item.name)?;
-                    let engine = UnzipEngine::for_file(zfile)?;
+        let fname = item.name.rsplit_once('.').ok_or(anyhow!("filename is missing extension"))?.0;
+        let args = [
+            "e",
+            "-y",
+            //"-o.",
+            "-sccUTF-8",
+            "-slp",
+            "-spf",
+            item.name.as_str(),
+        ];
+        let mut z7_run = Command::new("./7za.exe").args(args).spawn().map_err(|e| anyhow!("failed to start 7zip: {}",e))?;
+        //let z7_progress = ProgressBar::new_spinner().with_style(ProgressStyle::with_template("{spinner} {msg:.green.bold}")?);
+        //z7_progress.inc(1);
+        let error = z7_run.wait()?;
+        if !error.success(){
+            return Err(anyhow!("failed to extract {}\n (see 7zip log)",item.name));
 
-                    let progress = ProgressBar::new(item.size as u64).with_style(ProgressStyle::with_template(PROGRESS_STYLE)?);
-                    let zprogress = Box::new(UnzipProgresshandler{
-                        progress_bar: &progress
-                    });
-
-                    let options = UnzipOptions{
-                        output_directory: Some("./".into()),
-                        password: None,
-                        single_threaded: false,
-                        filename_filter: None,
-                        progress_reporter: zprogress
-                    };
-                    engine.unzip(options)?;
-                }
-            }
         }
+        //z7_progress.finish();
+        fs::remove_file("7za.exe")?;
+        fs::remove_file(&item.name)?;
+        println!("{}",format!("Extracted {fname}").green().bold());
     }
     Ok(())
 }

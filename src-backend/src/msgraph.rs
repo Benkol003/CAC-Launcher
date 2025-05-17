@@ -21,14 +21,12 @@ use reqwest::{
     Version,
 };
 
-use crate::secrets;
+use crate::{secrets, PROGRESS_STYLE};
 
 const TENANT_ID: &str = "4fd01353-8fd7-4a18-a3a1-7cd70f528afa";
 const APP_CLIENT_ID: &str = "9ecaa0e8-9caf-4f49-94e8-8430bbf57486";
 const MSAPI_URL: &str = "https://graph.microsoft.com/v1.0/";
 //const MSGPRAPH_KEY - place in secrets.rs
-
-const PROGRESS_STYLE: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
 
 ///[msgraph reference](https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token)
 #[derive(Deserialize)] //TODO remove?
@@ -85,7 +83,6 @@ pub enum FsEntryType {
 fn get_encoded_sharing_url(client: &Client, url: &str) -> Result<String, Error> {
     let response = client.get(url).send()?;
     let final_url = response.url().as_str();
-    println!("final url: {}",final_url);
     return Ok(format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(final_url)));
 }
 
@@ -172,7 +169,6 @@ pub fn login(client: &Client) -> Result<String, Error> {
         .send()?;
 
     if response.status().is_success() {
-        //println!("access token: {}",response.text().as_ref()?);
         let json: TokenResponse = response.json()?;
         return Ok(json.access_token);
     } else {

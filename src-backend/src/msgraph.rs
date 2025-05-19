@@ -147,7 +147,7 @@ pub fn download_item(client: &Client, token: &str, item: &SharedDriveItem,dest_f
         file.write(&buf[..readBytes])?;
         progress.inc(BLOCK_SIZE as u64);
     }
-    progress.finish();
+    progress.finish_and_clear();
     Ok(())
 }
 

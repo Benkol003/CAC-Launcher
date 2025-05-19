@@ -1,4 +1,4 @@
-use std::{fmt::format, fs::{self, File}, io::{Read, Write}};
+use std::{env, fmt::format, fs::{self, File}, io::{Read, Write}, panic};
 use std::process::{Command, Stdio};
 use anyhow::{anyhow, Error};
 use clap::Parser;
@@ -29,13 +29,7 @@ struct ArgsGroup {
 
 //TODO remove duplicates
 fn main() -> Result<(),Error> {
-
     //unpack z7
-    {
-        let mut z7 = File::create("7za.exe")?;
-        z7.write_all(Z7_EXE).map_err(|_| anyhow!("failed to unpack 7za.exe"))?;
-    }
-
     let args = Args::parse();
     let ctx = build_client_ctx()?;
     let token = msgraph::login(&ctx.client)?;
@@ -51,6 +45,16 @@ fn main() -> Result<(),Error> {
 
     }else if let Some(url) = args.args.url {
         urls.push(url);
+    }
+
+    if urls.len()==0 {
+        println!("{}","no URL's provided to download.".yellow());
+        return Ok(());
+    }
+
+    { //scope so file is closed before running process
+        let mut z7 = File::create("7za.exe")?;
+        z7.write_all(Z7_EXE).map_err(|_| anyhow!("failed to unpack 7za.exe"))?;
     }
 
     for url in urls {
@@ -76,9 +80,11 @@ fn main() -> Result<(),Error> {
 
         }
         //z7_progress.finish();
-        fs::remove_file("7za.exe")?;
-        fs::remove_file(&item.name)?;
         println!("{}",format!("Extracted {fname}").green().bold());
+        fs::remove_file(&item.name)?;
     }
+
+    fs::remove_file("7za.exe")?;
+    
     Ok(())
 }

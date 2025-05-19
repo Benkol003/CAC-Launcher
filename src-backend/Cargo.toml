@@ -19,7 +19,6 @@ blake3 = "1.8.2"
 chrono = "0.4.40"
 clap = { version = "4.5.38", features = ["derive"] }
 colored = "3.0.0"
-compress-tools = "0.15.1"
 indicatif = "0.17.11"
 jwalk = "0.8.1"
 memmap2 = "0.9.5"

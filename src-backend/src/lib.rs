@@ -16,7 +16,9 @@ pub mod dirhash;
 use std::{sync::Mutex,default, env, fmt::Debug, io::Write, path::Path, str::FromStr, sync::Arc, time::SystemTime, usize};
 use anyhow::{anyhow,Error};
 use base64::display;
-use reqwest::{blocking::{Client, Request, Response}, header, redirect::Policy,Url};
+use msgraph::SharedDriveItem;
+use regex::Regex;
+use reqwest::{Client, Request, Response, header, redirect::Policy,Url};
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex, CookieStoreRwLock};
 use stopwatch::Stopwatch;
 use tokio_util::sync::CancellationToken;
@@ -44,7 +46,7 @@ pub async fn download_file(info: DownloadInfo,path: &Path,canceller: Cancellatio
 }
 
 //using reqwest
-pub fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<DownloadInfo,Error> {
+pub async fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<DownloadInfo,Error> {
 
     //make sure to clear out FedAuth cookie so it doesnt break stuff
     {
@@ -54,7 +56,7 @@ pub fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<Download
 
     //resolve tinyurl to underlying sharepoint url and to get session cookies
     let mut clock = Stopwatch::start_new();
-    let response = ctx.client.get(url.clone()).send()?;
+    let response = ctx.client.get(url.clone()).send().await?;
     clock.stop();
     println!("v1 time: {}ms",clock.elapsed_ms());
     let once_url = response.url().as_str();
@@ -69,9 +71,9 @@ pub fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<Download
     }
 
     //redirect to download 
-    let response = ctx.client.head(download_url.clone()).send()?;
+    let response = ctx.client.head(download_url.clone()).send().await?;
     if !response.status().is_success(){
-        return Err(anyhow!("failed to fetch url {} - HTTP error {}: {}",&download_url,response.status().as_str(),response.text()?));
+        return Err(anyhow!("failed to fetch url {} - HTTP error {}: {}",&download_url,response.status().as_str(),response.text().await?));
     }
     let file_size = match response.headers().get(reqwest::header::CONTENT_LENGTH) {
         Some(sz) => sz.to_str()?.parse()?,
@@ -102,7 +104,7 @@ pub fn build_client_ctx() -> Result<ClientCtx,Error> {
 
     let jar = Arc::new(CookieStoreRwLock::new(CookieStore::new(None)));
     let clientCtx = ClientCtx{
-        client: reqwest::blocking::Client::builder()
+        client: reqwest::Client::builder()
         .cookie_provider(jar.clone())
         .default_headers(headers)
         .redirect(Policy::limited(10))
@@ -111,4 +113,28 @@ pub fn build_client_ctx() -> Result<ClientCtx,Error> {
         jar: jar
     };
     Ok(clientCtx)
+}
+
+/// Given a vec of drive items, will group partial archives by their full archive name (without the .nnn extension). Single archives are just a vec of one element
+pub fn group_drive_item_archives(drive_items: Vec<SharedDriveItem>) -> Result<Vec<(String, Vec<SharedDriveItem>)>,Error> {
+    let mut items: Vec<(String, Vec<SharedDriveItem>)> = Vec::new();
+
+    for i in drive_items {
+        let (basename, ext) = i.name.rsplit_once('.').ok_or(anyhow!("failed to rsplit filename to get extension"))?;
+        let re_partial_ext = Regex::new("^[0-9]{3}$")?;
+        if re_partial_ext.is_match(ext){
+            //partial archive grouping 
+            match items.iter().position(|j| {j.0 == basename}){
+                None => {
+                    items.push((basename.to_string(),vec!(i)));
+                }
+                Some(idx) => {
+                    items[idx].1.push(i);
+                }
+            }
+        }else{
+            items.push((basename.to_string(),vec!(i)));
+        }
+    }
+    Ok(items)
 }

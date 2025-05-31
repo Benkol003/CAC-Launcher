@@ -5,9 +5,12 @@
 #![allow(warnings)]
 
 use anyhow::{ anyhow, Error };
+use futures_util::TryStreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use serde_json::map::Entry;
 use serde::{ Deserialize };
+use tokio::io::{AsyncReadExt, BufReader};
+use tokio_util::io::StreamReader;
 use std::{ collections::HashMap, fmt::Debug, io::{Read, Write}, path::Path };
 use stopwatch::Stopwatch;
 use urlencoding;
@@ -15,7 +18,7 @@ use urlencoding;
 use base64::{ self, prelude::{ BASE64_STANDARD_NO_PAD, BASE64_URL_SAFE_NO_PAD }, Engine };
 
 use reqwest::{
-    blocking::{ get, Client },
+    {get, Client },
     header::{ self, HeaderMap, CONTENT_TYPE, HOST },
     Url,
     Version,
@@ -80,22 +83,22 @@ pub enum FsEntryType {
 
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0&tabs=http)
-fn get_encoded_sharing_url(client: &Client, url: &str) -> Result<String, Error> {
-    let response = client.get(url).send()?;
+async fn get_encoded_sharing_url(client: &Client, url: &str) -> Result<String, Error> {
+    let response = client.get(url).send().await?;
     let final_url = response.url().as_str();
     return Ok(format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(final_url)));
 }
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0&tabs=http)
-pub fn get_shared_drive_item(
-    client: &Client,
-    token: &str,
-    url: &str
+pub async fn get_shared_drive_item(
+    client: Client,
+    token: String,
+    url: String
 ) -> Result<SharedDriveItem, Error> {
-    let client = reqwest::blocking::Client::new();
+    let client = reqwest::Client::new();
     //let mut params = HashMap::new();
 
-    let share_id = get_encoded_sharing_url(&client,&url)?;
+    let share_id = get_encoded_sharing_url(&client,&url).await?;
     let mut headers = HeaderMap::new();
     headers.append(header::AUTHORIZATION, format!("Bearer {}", token).parse()?);
     headers.append(header::CONTENT_TYPE, "application/json".parse()?);
@@ -103,20 +106,20 @@ pub fn get_shared_drive_item(
     let mut response = client
         .get(format!("{}shares/{}/driveItem", MSAPI_URL, share_id))
         .headers(headers)
-        .send()?;
+        .send().await?;
     if response.status().as_u16() != 200 {
         return Err(
-            anyhow!("http error - code {}, text: {}", response.status().as_u16(), response.text()?)
+            anyhow!("http error - code {}, text: {}", response.status().as_u16(), response.text().await?)
         );
     }
 
-    let mut ret: SharedDriveItem = response.json()?;
+    let mut ret: SharedDriveItem = response.json().await?;
     ret.share_id = share_id;
     return Ok(ret);
 }
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0&tabs=http)
-pub fn download_item(client: &Client, token: &str, item: &SharedDriveItem,dest_folder: &str) -> Result<(), Error> {
+pub async fn download_item(client: &Client, token: &str, item: &SharedDriveItem,dest_folder: &str) -> Result<(), Error> {
     let dest_folder = Path::new(dest_folder);
     std::fs::create_dir_all(dest_folder)?;
     let mut file =  std::fs::File::create(dest_folder.join(item.name.clone()))?;
@@ -131,18 +134,23 @@ pub fn download_item(client: &Client, token: &str, item: &SharedDriveItem,dest_f
     let mut response = client
         .get(format!("{}shares/{}/driveItem/content", MSAPI_URL, item.share_id))
         .headers(headers)
-        .send()?;
+        .send().await?;
 
     if(!response.status().is_success()) {
         return Err(anyhow!("download URL HTTP error: {}",response.status().as_str()));
     }
 
-    //assuming 4K buffer is best for IO TODO 
+    //assuming 4K buffer is best for IO 
     const BLOCK_SIZE: usize = 4096;
     let mut buf : [u8; BLOCK_SIZE] = [0;BLOCK_SIZE];
     let mut readBytes : usize;
+    let reader = response.bytes_stream();
+
+    //TODO: profile between using stream directly to file or use buffered reader
+    let reader = StreamReader::new(reader.map_err(|e| std::io::Error::other(e)));
+    let mut reader = BufReader::with_capacity(4096,reader);
     while(true){
-        readBytes = response.read(&mut buf)?;
+        readBytes = reader.read(&mut buf).await?;
         if(readBytes==0) {break;}
         file.write(&buf[..readBytes])?;
         progress.inc(BLOCK_SIZE as u64);
@@ -153,7 +161,7 @@ pub fn download_item(client: &Client, token: &str, item: &SharedDriveItem,dest_f
 
 ///[msgraph reference](https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token)\
 ///TODO: switch to using a certificate
-pub fn login(client: &Client) -> Result<String, Error> {
+pub async fn login(client: &Client) -> Result<String, Error> {
     //get an access token
     let mut params = HashMap::new();
     params.insert("client_id", APP_CLIENT_ID);
@@ -166,10 +174,10 @@ pub fn login(client: &Client) -> Result<String, Error> {
         .header(HOST, "login.microsoftonline.com")
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .form(&params)
-        .send()?;
+        .send().await?;
 
     if response.status().is_success() {
-        let json: TokenResponse = response.json()?;
+        let json: TokenResponse = response.json().await?;
         return Ok(json.access_token);
     } else {
         return Err(

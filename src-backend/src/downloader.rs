@@ -1,17 +1,22 @@
-use std::{env, fmt::format, fs::{self, File}, io::{BufRead, BufReader, Read, Write}, panic};
+use std::{fs::{self, File}, io::{BufRead, BufReader, Read, Write}, path::{Path, PathBuf}};
 use std::process::{Command, Stdio};
 use anyhow::{anyhow, Error};
 use clap::Parser;
 use indicatif::{ProgressBar, ProgressStyle};
 use colored::Colorize;
 
-use src_backend::*;
+use src_backend::{msgraph::SharedDriveItem, *};
+use tokio::task::JoinSet;
 
 static Z7_EXE: &[u8] = include_bytes!("7za.exe");
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {
+
+    #[arg(short,default_value = "")]
+    output_dir: String,
+    
     #[clap(flatten)]
     args: ArgsGroup,
 }
@@ -21,20 +26,22 @@ struct Args {
 struct ArgsGroup {
 
     #[arg(short, conflicts_with = "url")]
-    url_list_file: Option<String>,
+    file_url_list: Option<String>,
 
-    #[arg(index = 1, conflicts_with = "url_list_file")]
-    url: Option<String>,
+    #[arg(index = 1, conflicts_with = "file_url_list")]
+    url: Option<Vec<String>>,
+
 }
 
 //TODO remove duplicates
-fn main() -> Result<(),Error> {
+#[tokio::main]
+async fn main() -> Result<(),Error> {
 
     let args = Args::parse();
     let ctx = build_client_ctx()?;
-    let token = msgraph::login(&ctx.client)?;
+    let token = msgraph::login(&ctx.client).await?;
     let mut urls: Vec<String> = Vec::new();
-    if let Some(path) = args.args.url_list_file {
+    if let Some(path) = args.args.file_url_list {
         if !std::fs::exists(&path)? {
             return Err(anyhow!("file {} does not exist",&path));
         }
@@ -43,8 +50,8 @@ fn main() -> Result<(),Error> {
         file.read_to_string(&mut content)?;
         urls.extend(content.lines().map(|x| x.to_string()));
 
-    }else if let Some(url) = args.args.url {
-        urls.push(url);
+    }else if let Some(mut urls_in) = args.args.url {
+        urls.append(&mut urls_in);
     }
 
     if urls.len()==0 {
@@ -57,12 +64,39 @@ fn main() -> Result<(),Error> {
         z7.write_all(Z7_EXE).map_err(|_| anyhow!("failed to unpack 7za.exe"))?;
     }
 
-    for url in urls {
-        let item = msgraph::get_shared_drive_item(&ctx.client, &token, &url)?;
-        msgraph::download_item(&ctx.client, &token, &item, "./")?;
-        unzip(&item.name)?;
-        println!("{}",format!("Extracted {}",&item.name).bold().green());
-        fs::remove_file(&item.name)?;
+    //grab info first and group partial archives
+    println!("Fetching link info...");
+    let mut tasks = JoinSet::new(); 
+    urls.iter().for_each(|u| {tasks.spawn(msgraph::get_shared_drive_item(ctx.client.clone(), token.clone(), u.clone()));});
+    let drive_items: Vec<SharedDriveItem>   = tasks.join_all().await.into_iter().collect::<Result<_,_>>()?;
+    let items = group_drive_item_archives(drive_items)?;
+
+    println!("items:");
+    for i in &items {
+        println!("\t{}",i.0);
+        for j in &i.1 {
+            println!("\t\t{}",j.name);
+        }
+    }
+
+    println!("Downloading {} files...",urls.len());
+
+    //TODO 
+    // limit number of running downloads. unzip can be parralel, but all previous downloads for a split archive need to be downloaded first
+    for item in &items {
+        
+        for part in &item.1 {
+            msgraph::download_item(&ctx.client, &token, &part, &args.output_dir).await?;
+        }
+
+        //7zip will automatically find and extract the remaining parts
+
+        //TODO pathbuf is fucking awful.
+        unzip([args.output_dir.clone(),item.1[0].name.clone()].iter().collect::<PathBuf>().as_os_str().to_str().ok_or(anyhow!("PathBuf to &str failed"))?)?;
+        println!("{}",format!("Extracted {}",&item.1[0].name).bold().green());
+        for f in &item.1 {
+            fs::remove_file([args.output_dir.clone(),f.name.clone()].iter().collect::<PathBuf>())?;
+        }
     }
 
     fs::remove_file("7za.exe")?;
@@ -121,6 +155,9 @@ fn unzip(fname: &str) -> Result<(),Error> {
 
         let error = z7_run.wait()?;
         if !error.success(){
+            let mut reader = BufReader::new(z7_run.stdout.ok_or(anyhow!("failed to get stdout to running process"))?);
+            let mut z7log = String::new();
+            reader.read_to_string(&mut z7log)?;
             return Err(anyhow!("failed to extract {}\n (see 7zip log)",fname));
 
         }

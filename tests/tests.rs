@@ -14,14 +14,14 @@ mod tests {
 
     use super::*;
 
-    #[test]
-    fn msgraph_folder_link() -> Result<(), Error> {
+    #[tokio::test]
+    async fn msgraph_folder_link() -> Result<(), Error> {
         //SPE folder link to multi parts
         let url = "https://tinyurl.com/2p9k9dsn";
 
         let client_ctx = build_client_ctx()?;
-        let token = msgraph::login(&client_ctx.client)?;
-        let item = msgraph::get_shared_drive_item(&client_ctx.client, &token, url)?;
+        let token = msgraph::login(&client_ctx.client).await?;
+        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), url.to_string()).await?;
         if let FsEntryType::File { hashes: _ } = item.item {
             panic!("shared drive item is file not folder");
         }
@@ -29,40 +29,40 @@ mod tests {
         Ok(())
     }
 
-    #[test]
-    fn msgraph_download() -> Result<(), Error> {
+    #[tokio::test]
+    async fn msgraph_download() -> Result<(), Error> {
         let client_ctx = build_client_ctx()?;
-        let token = msgraph::login(&client_ctx.client)?;
+        let token = msgraph::login(&client_ctx.client).await?;
         let url="https://tinyurl.com/uvs5dkdj";
-        let item = msgraph::get_shared_drive_item(&client_ctx.client, &token, &url)?;
-        msgraph::download_item(&client_ctx.client, &token,&item,"./tmp")?;
+        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), url.to_string()).await?;
+        msgraph::download_item(client_ctx.client.clone(), token.clone(),item.clone(),"./tmp".to_string()).await?;
         Ok(())
     }
 
-    #[test]
-    fn url_redirect() -> Result<(), Error> {
+    #[tokio::test]
+    async fn url_redirect() -> Result<(), Error> {
         let url = "https://tinyurl.com/uvs5dkdj";
         let client_ctx = build_client_ctx()?;
-        let response = client_ctx.client.get(url).send()?;
+        let response = client_ctx.client.get(url).send().await?;
 
         let new_url = response.url();
         println!("final url: {}", new_url);
 
-        let token = msgraph::login(&client_ctx.client)?;
-        let item = msgraph::get_shared_drive_item(&client_ctx.client, &token, new_url.as_str())?;
+        let token = msgraph::login(&client_ctx.client).await?;
+        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), new_url.to_string()).await?;
         println!("item:\n{:?}", item);
 
         Ok(())
     }
 
-    #[test]
-    fn msgraph_direct_link() -> Result<(), Error> {
+    #[tokio::test]
+    async fn msgraph_direct_link() -> Result<(), Error> {
         //CBA_A3 direct download link
         let url =
             "https://tinyurl.com/uvs5dkdj";
         let client_ctx = build_client_ctx()?;
-        let token = msgraph::login(&client_ctx.client)?;
-        let item = msgraph::get_shared_drive_item(&client_ctx.client, &token, url)?;
+        let token = msgraph::login(&client_ctx.client).await?;
+        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), url.to_string()).await?;
         println!("item:\n{:?}", item);
         if let FsEntryType::Folder { child_count: _ } = item.item {
             panic!("shared drive item is folder not file");

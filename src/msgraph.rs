@@ -42,7 +42,7 @@ pub struct TokenResponse {
 
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/resources/driveitem?view=graph-rest-1.0)
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct SharedDriveItem {
     /// the encoded sharing url for making new requests. This is not part of the msgraph DriveItem json response.
@@ -65,13 +65,13 @@ pub struct SharedDriveItem {
 //     pub child_count: usize,
 // }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct Hashes {
     pub quick_xor_hash: String,
 }
 
-#[derive(Deserialize, Debug)]
+#[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
 pub enum FsEntryType {
     File {
@@ -119,8 +119,8 @@ pub async fn get_shared_drive_item(
 }
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0&tabs=http)
-pub async fn download_item(client: &Client, token: &str, item: &SharedDriveItem,dest_folder: &str) -> Result<(), Error> {
-    let dest_folder = Path::new(dest_folder);
+pub async fn download_item(client: Client, token: String, item: SharedDriveItem,dest_folder: String) -> Result<(), Error> {
+    let dest_folder = Path::new(dest_folder.as_str());
     std::fs::create_dir_all(dest_folder)?;
     let mut file =  std::fs::File::create(dest_folder.join(item.name.clone()))?;
     let progress = ProgressBar::new(item.size as u64).with_style(ProgressStyle::with_template(PROGRESS_STYLE)?);//TODO static assert usize::MAX<= u64::MAX

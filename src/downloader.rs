@@ -86,7 +86,7 @@ async fn main() -> Result<(),Error> {
     for item in &items {
         
         for part in &item.1 {
-            msgraph::download_item(&ctx.client, &token, &part, &args.output_dir).await?;
+            msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone()).await?;
         }
 
         //7zip will automatically find and extract the remaining parts

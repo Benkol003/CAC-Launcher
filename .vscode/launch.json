@@ -5,10 +5,10 @@
             "name": "rust: debug",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceRoot}/src-backend/target/debug/src-backend.exe",
+            "program": "${workspaceRoot}/target/debug/src-backend.exe",
             "args": [],
             "stopAtEntry": false,
-            "cwd": "${workspaceRoot}/src-backend",
+            "cwd": "${workspaceRoot}/",
             "environment": [],
             "externalConsole": true
         },
@@ -21,7 +21,7 @@
             "program": "???",
             "args": ["test","--","--nocapture"],
             "stopAtEntry": false,
-            "cwd": "${workspaceRoot}/src-backend",
+            "cwd": "${workspaceRoot}/",
             "environment": [],
             "externalConsole": true
         },

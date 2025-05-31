@@ -1,3 +1,0 @@
-[submodule "src-backend/unzip/7zip"]
-	path = src-backend/unzip/7zip
-	url = git@github.com:ip7z/7zip.git

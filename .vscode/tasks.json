@@ -12,7 +12,7 @@
 				"--nocapture"
 			],
 			"options": {
-				"cwd": "${workspaceRoot}/src-backend"
+				"cwd": "${workspaceRoot}/"
 			},
 			"group": {
 				"kind": "build",

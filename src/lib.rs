@@ -13,7 +13,7 @@ pub mod secrets;
 ///utilities for verifying downloaded mods.
 pub mod dirhash;
 
-use std::{sync::Mutex,default, env, fmt::Debug, io::Write, path::Path, str::FromStr, sync::Arc, time::SystemTime, usize};
+use std::{default, env, fmt::Debug, fs::{remove_file, File}, io::{Read, Write}, path::{Path, PathBuf}, str::FromStr, sync::{Arc, Mutex}, time::SystemTime, usize};
 use anyhow::{anyhow,Error};
 use base64::display;
 use msgraph::SharedDriveItem;
@@ -28,6 +28,8 @@ use jwalk::WalkDir;
 //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
 pub const PROGRESS_STYLE: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
+
+pub static Z7_EXE: &[u8] = include_bytes!("7za.exe");
 
 pub struct DownloadInfo {
         pub sessionUrl: Url,

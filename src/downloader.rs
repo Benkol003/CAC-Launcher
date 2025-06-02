@@ -8,8 +8,6 @@ use colored::Colorize;
 use src_backend::{msgraph::SharedDriveItem, *};
 use tokio::task::JoinSet;
 
-static Z7_EXE: &[u8] = include_bytes!("7za.exe");
-
 #[derive(Parser, Debug)]
 #[command(version, about)]
 struct Args {

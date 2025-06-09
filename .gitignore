@@ -1,8 +1,11 @@
 target/
-**/@*/
+**/@*
 **/cargo.lock
 .vscode/*
 !.vscode/extensions.json
 !**/.vscode/launch.json
 !**/.vscode/tasks.json
 src/secrets.rs
+7z.log
+7za.exe
+CAC-Config

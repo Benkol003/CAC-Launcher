@@ -15,7 +15,7 @@ use std::{ collections::HashMap, fmt::Debug, io::{Read, Write}, path::Path };
 use stopwatch::Stopwatch;
 use urlencoding;
 
-use base64::{ self, prelude::{ BASE64_STANDARD_NO_PAD, BASE64_URL_SAFE_NO_PAD }, Engine };
+use base64::{ self, prelude::{ BASE64_STANDARD_NO_PAD, BASE64_URL_SAFE_NO_PAD }, read, Engine };
 
 use reqwest::{
     {get, Client },
@@ -139,21 +139,21 @@ pub async fn download_item(client: Client, token: String, item: SharedDriveItem,
     if(!response.status().is_success()) {
         return Err(anyhow!("download URL HTTP error: {}",response.status().as_str()));
     }
-
-    //assuming 4K buffer is best for IO 
-    const BLOCK_SIZE: usize = 4096;
+ 
+    //BufReader wont read more than 16KB anyway most likely due to max MTU size
+    const BLOCK_SIZE: usize = 16*1024;
     let mut buf : [u8; BLOCK_SIZE] = [0;BLOCK_SIZE];
     let mut readBytes : usize;
     let reader = response.bytes_stream();
 
     //TODO: profile between using stream directly to file or use buffered reader
     let reader = StreamReader::new(reader.map_err(|e| std::io::Error::other(e)));
-    let mut reader = BufReader::with_capacity(4096,reader);
+    let mut reader = BufReader::with_capacity(BLOCK_SIZE,reader);
     while(true){
         readBytes = reader.read(&mut buf).await?;
         if(readBytes==0) {break;}
         file.write(&buf[..readBytes])?;
-        progress.inc(BLOCK_SIZE as u64);
+        progress.inc(readBytes as u64);
     }
     progress.finish_and_clear();
     Ok(())

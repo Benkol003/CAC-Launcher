@@ -5,12 +5,16 @@
             "name": "rust: debug",
             "type": "lldb",
             "request": "launch",
-            "program": "${workspaceRoot}/target/debug/src-backend.exe",
+            "program": "${workspaceRoot}/target/debug/main.exe",
             "args": [],
-            "stopAtEntry": false,
             "cwd": "${workspaceRoot}/",
-            "environment": [],
-            "externalConsole": true
+        },
+
+                {
+            "name": "rust: debug attach",
+            "type": "lldb",
+            "request": "attach",
+            "pid" : "${command:pickProcess}"
         },
 
         {

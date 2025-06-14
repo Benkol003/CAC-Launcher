@@ -3,6 +3,7 @@ use anyhow::{anyhow, Error};
 use clap::Parser;
 use colored::Colorize;
 
+use indicatif::{ProgressBar, ProgressStyle};
 use src_backend::{msgraph::SharedDriveItem, *};
 use tokio::task::JoinSet;
 
@@ -17,6 +18,7 @@ struct Args {
     args: ArgsGroup,
 }
 
+//TODO: add suppport for also reading the modlist json config
 #[derive(Parser, Debug)]
 #[group(required = true, multiple = false)]
 struct ArgsGroup {
@@ -55,6 +57,7 @@ async fn main() -> Result<(),Error> {
         return Ok(());
     }
 
+    let _z7 = FileAutoDeleter::new("7za.exe"); //allows file to be deleted automatically even if theres an error
     { //scope so file is closed before running process
         let mut z7 = File::create("7za.exe")?;
         z7.write_all(Z7_EXE).map_err(|_| anyhow!("failed to unpack 7za.exe"))?;
@@ -69,9 +72,9 @@ async fn main() -> Result<(),Error> {
 
     println!("items:");
     for i in &items {
-        println!("\t{}",i.0);
+        println!("  {}",i.0);
         for j in &i.1 {
-            println!("\t\t{}",j.name);
+            println!("    \u{22a2}{}",j.name);
         }
     }
 
@@ -80,22 +83,25 @@ async fn main() -> Result<(),Error> {
     //TODO 
     // limit number of running downloads. unzip can be parralel, but all previous downloads for a split archive need to be downloaded first
     for item in &items {
-        
         for part in &item.1 {
-            msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone()).await?;
+            let mut progress = ProgressBar::new(0).with_style(ProgressStyle::with_template(PROGRESS_STYLE)?);//TODO static assert usize::MAX<= u64::MAX
+            msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone(),&mut progress).await?;
         }
 
         //7zip will automatically find and extract the remaining parts
 
         //TODO pathbuf is fucking awful.
-        unzip([args.output_dir.clone(),item.1[0].name.clone()].iter().collect::<PathBuf>().as_os_str().to_str().ok_or(anyhow!("PathBuf to &str failed"))?)?;
+        let mut z7_progress = ProgressBar::new_spinner().with_style(
+            ProgressStyle::with_template("{spinner} Extracting: {percent}% Elapsed: {elapsed}, ETA: {eta} {msg:.green.bold}")?);
+        z7_progress.set_length(100);
+        unzip([args.output_dir.clone(),item.1[0].name.clone()].iter().collect::<PathBuf>().to_str().unwrap(),".",&mut z7_progress)?;
         println!("{}",format!("Extracted {}",&item.1[0].name).bold().green());
+
+        //remove archive or all partial archives
         for f in &item.1 {
             fs::remove_file([args.output_dir.clone(),f.name.clone()].iter().collect::<PathBuf>())?;
         }
     }
-
-    fs::remove_file("7za.exe")?;
     
     Ok(())
 }

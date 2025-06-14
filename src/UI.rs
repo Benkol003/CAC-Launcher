@@ -1,17 +1,17 @@
-use std::{collections::HashMap, io::{ stdout, Stdout }};
+use std::{collections::HashMap, io::{ self, stdout, Stdout, Write }, rc::Rc, sync::{atomic::AtomicBool, Arc, Mutex}, time::Duration};
 
 use a2s::info::Info;
 use anyhow::Error;
+use indicatif::TermLike;
 use ratatui::{
-    layout::{ Constraint, Flex, Layout, Rect }, prelude::CrosstermBackend, 
-    style::Stylize, symbols, text::{ Text, ToLine, ToText }, widgets::*, Terminal
+    layout::{ Alignment, Constraint, Flex, Layout, Rect }, prelude::CrosstermBackend, style::{Style, Stylize}, symbols, text::{ Text, ToLine, ToText }, widgets::{Block, Padding, Paragraph, Row, Table, Tabs, Widget}, Terminal
 };
 use crossterm::{
     event::{ self, read, Event, KeyCode, KeyEventKind, MouseEventKind },
     ExecutableCommand,
 };
 
-use ratatui::{ prelude::*, widgets::* };
+use std::cell::{Cell,RefCell};
 
 use crate::servers::{self, Server};
 
@@ -21,15 +21,130 @@ fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
     area
 }
 
-pub struct UI {
+/// helper struct for indicatif's ProgressBar, so 
+/// 
+#[derive(Debug)]
+pub struct ProgressBarBuffer {
+        pub width: Mutex<Cell<u16>>,
+        pub buffer: Arc<Mutex<RefCell<String>>>,
+}
+impl ProgressBarBuffer {
+    pub fn new(width: u16) -> Self {
+        ProgressBarBuffer {
+            width: Mutex::new(Cell::new(100)),
+            buffer: Arc::new(Mutex::new(RefCell::new(String::with_capacity(width as usize))))
+        }
+    }
+    pub fn set_width(&self, width: u16) -> () {
+        let lock = self.width.lock().unwrap();
+        lock.set(width);
+    }
+}
+impl TermLike for ProgressBarBuffer {
+    /// if the width isnt large enough then ProgressBar will simply refuse to print
+    fn width(&self) -> u16 {
+        let lock = self.width.lock().unwrap();
+        lock.get()
+    }
+    fn height(&self) -> u16 {
+        1
+    }
+    fn move_cursor_up(&self, n: usize) -> io::Result<()> {
+        Ok(())
+    }
+    fn move_cursor_down(&self, n: usize) -> io::Result<()>{
+        Ok(())
+    }
+    fn move_cursor_right(&self, n: usize) -> io::Result<()>{
+        Ok(())
+    }
+    fn move_cursor_left(&self, n: usize) -> io::Result<()>{
+        Ok(())
+    }
+    fn write_line(&self, s: &str) -> io::Result<()>{
+        self.write_str(s);
+        Ok(())
+    }
+    fn write_str(&self, s: &str) -> io::Result<()>{ 
+        //if ProgressBar tries to clear current line with empty line then just skip
+        if(s.len()==0 || !s.contains(|i| i!=' ')) {
+            //TODO add own clear logic, e.g. message length is reduced then clear is needed
+            return Ok(());
+        }
+        let buf_lock = self.buffer.lock().unwrap();
+        buf_lock.replace(s.to_string());
+        Ok(())
+    }
+    fn clear_line(&self) -> io::Result<()>{
+        let lock = self.buffer.lock().unwrap();
+        let s = lock.borrow_mut().clear();
+        Ok(())
+    }
+
+    //dont actually flush here - ProgressBar prints a blank clear line then flushes so you won't print anything
+    fn flush(&self) -> io::Result<()>{
+        Ok(())
+    }
+}
+
+pub struct TUI {
     pub term: Terminal<CrosstermBackend<Stdout>>,
 }
 
-impl UI {
+impl TUI {
     pub fn new() -> Self {
         std::io::stdout().execute(crossterm::event::EnableMouseCapture).unwrap();
-        UI {
-            term: Terminal::new(CrosstermBackend::new(stdout())).unwrap(),
+        let mut term = Terminal::new(CrosstermBackend::new(stdout())).unwrap();
+        term.clear();
+        TUI {
+            term: term,
+        }
+    }
+
+    /// blocking. TODO REMOVE
+    pub fn popup_progress(&mut self, pbuf: Arc<Mutex<RefCell<String>>>,finish: Arc<AtomicBool>) {
+        let mut prev_len =0;
+        loop {
+            let panel: Paragraph;
+            let v: String;
+            {
+                let lock = pbuf.lock().unwrap();
+                v = lock.borrow().clone();
+            }
+            let block = Block::bordered();
+            if v.len()==0 {
+                    log::warn!("detected ProgressBarBuffer len==0 (bug to fix)"); //TODO why is this happening...
+                    continue;
+            }
+            if v.len()!=prev_len {
+                self.term.clear();
+            }
+            prev_len = v.len();
+
+                panel = Paragraph::new(v).block(block).centered();
+            self.term.draw(|x| {
+                let width = panel.line_width() as u16;
+                panel
+                    .clone()
+                    .render(
+                        center(
+                            x.area(),
+                            Constraint::Length(width + 2),
+                            Constraint::Length((3) as u16)
+                        ),
+                        x.buffer_mut()
+                    );
+            });
+
+            if crossterm::event::poll(Duration::from_millis(0)).unwrap(){
+                let e = crossterm::event::read().unwrap();
+                if e.is_key_press() {
+                return;
+                }
+            }
+            if finish.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
         }
     }
 
@@ -165,7 +280,7 @@ impl UI {
 
 }
 
-impl Drop for UI {
+impl Drop for TUI {
     fn drop(&mut self) {
         self.term.clear();
         self.term.show_cursor();

@@ -9,3 +9,4 @@ src/secrets.rs
 7z.log
 7za.exe
 CAC-Config
+*.log

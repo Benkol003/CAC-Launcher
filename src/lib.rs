@@ -20,7 +20,8 @@ use anyhow::{anyhow,Error};
 use base64::display;
 use indicatif::{ProgressBar, ProgressStyle};
 use msgraph::SharedDriveItem;
-use regex::Regex;
+use once_cell::unsync::{Lazy, OnceCell};
+use regex::{bytes::Match, Regex};
 use reqwest::{Client, Request, Response, header, redirect::Policy,Url};
 use reqwest_cookie_store::{CookieStore, CookieStoreMutex, CookieStoreRwLock};
 use stopwatch::Stopwatch;
@@ -31,7 +32,12 @@ use jwalk::WalkDir;
 //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
 pub const PROGRESS_STYLE: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
-pub const CONFIG_FOLDER: &str = "./CAC-Config";
+pub const CONFIG_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
+    PathBuf::from("CAC-Config")
+});
+pub const TMP_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("tmp")
+});
 
 pub static Z7_EXE: &[u8] = include_bytes!("7za.exe");
 
@@ -49,6 +55,16 @@ impl Drop for FileAutoDeleter {
  fn drop(&mut self) {
     std::fs::remove_file(&self.0).unwrap();
  }
+}
+
+pub fn force_create_dir(path: &PathBuf) -> Result<(),Error>{
+    if !std::fs::exists(path)? {
+        std::fs::create_dir(path);
+    }else if !std::fs::metadata(path)?.is_dir(){
+        std::fs::remove_file(path);
+        std::fs::create_dir(path);
+    }
+    Ok(())
 }
 
 
@@ -162,13 +178,14 @@ pub fn group_drive_item_archives(drive_items: Vec<SharedDriveItem>) -> Result<Ve
     Ok(items)
 }
 
-pub fn unzip(fname: &str) -> Result<(),Error> {
+pub fn unzip(fname: &str,dest: &str, progress: &mut ProgressBar) -> Result<String,Error> {
     let mut z7_stderr_log: Vec<u8> = Vec::new();
 
+    let o_arg = format!("-o{}",dest);
     let args = [
             "e",
             "-y",
-            //"-o.",
+            o_arg.as_str(),
             "-sccUTF-8",
             "-slp",
             "-spf",
@@ -179,9 +196,6 @@ pub fn unzip(fname: &str) -> Result<(),Error> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn().map_err(|e| anyhow!("failed to start 7zip: {}",e))?;
-
-        let z7_progress = ProgressBar::new_spinner().with_style(ProgressStyle::with_template("{spinner} Extracting: {percent}% Elapsed: {elapsed}, ETA: {eta} {msg:.green.bold}")?);
-        z7_progress.set_length(100);
         let mut reader = BufReader::new(z7_run.stderr.take().ok_or(anyhow!("failed to get stderr to running process"))?);
         let mut buf = Vec::new();
         while z7_run.try_wait()?.is_none() {
@@ -203,17 +217,16 @@ pub fn unzip(fname: &str) -> Result<(),Error> {
             match msg {
                 None => {},
                 Some(s) => {
-                    z7_progress.set_message(s.1.to_string());
+                    progress.set_message(s.1.to_string());
                 }
             }
             let pc = pc.to_string(); let pci: u64 = pc.trim().parse()?;
-            z7_progress.set_position(pci);
+            progress.set_position(pci);
             if r==0 {
                 break;
             }
         }
-
-        z7_progress.finish_and_clear();
+        progress.finish_and_clear();
 
         let error = z7_run.wait()?;
         if !error.success(){
@@ -228,7 +241,10 @@ pub fn unzip(fname: &str) -> Result<(),Error> {
             return Err(anyhow!("failed to extract {} (see 7z.log)",fname));
         }
 
-        Ok(())
+        //return the folder name we extracted to
+        //will get the folder name from the archive name. also works with multipart archives ending in .nnn
+        let regex = Regex::new(r#"^(.*?)\.(?:zip|7z)(?:\.\d{3})?$"#).unwrap();
+        Ok(regex.captures(fname).unwrap().get(1).unwrap().as_str().to_string())
 }
 
 pub fn launch_steam() -> Result<(),Error> {

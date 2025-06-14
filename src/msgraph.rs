@@ -119,11 +119,14 @@ pub async fn get_shared_drive_item(
 }
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/driveitem-get-content?view=graph-rest-1.0&tabs=http)
-pub async fn download_item(client: Client, token: String, item: SharedDriveItem,dest_folder: String) -> Result<(), Error> {
+/// TODO: will hang if connection fails mid download
+/// TODO: suspend / resume partial file downloads
+pub async fn download_item(client: Client, token: String, item: SharedDriveItem,dest_folder: String,progress: &mut ProgressBar) -> Result<(), Error> {
     let dest_folder = Path::new(dest_folder.as_str());
     std::fs::create_dir_all(dest_folder)?;
     let mut file =  std::fs::File::create(dest_folder.join(item.name.clone()))?;
-    let progress = ProgressBar::new(item.size as u64).with_style(ProgressStyle::with_template(PROGRESS_STYLE)?);//TODO static assert usize::MAX<= u64::MAX
+
+    progress.set_length(item.size as u64);
     progress.set_message(format!("Downloading {}",item.name)); 
 
     //cd "" == cd "./"

@@ -14,7 +14,7 @@ pub struct Server {
 }
 
 pub fn read_config() -> Result<Vec<(String,Server)>, Error> {
-    let conf_path = PathBuf::from(CONFIG_FOLDER).join("servers.json");
+    let conf_path = CONFIG_FOLDER.join("servers.json");
     if !std::fs::exists(&conf_path)? {
         return Err(anyhow!("servers.json config file not found"));
     }

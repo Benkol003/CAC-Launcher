@@ -9,6 +9,7 @@ use anyhow::{ anyhow, Error, Context };
 use src_backend::*;
 #[cfg(test)]
 mod tests {
+    use indicatif::ProgressBar;
     use reqwest::Url;
     use src_backend::msgraph::FsEntryType;
 
@@ -35,7 +36,8 @@ mod tests {
         let token = msgraph::login(&client_ctx.client).await?;
         let url="https://tinyurl.com/uvs5dkdj";
         let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), url.to_string()).await?;
-        msgraph::download_item(client_ctx.client.clone(), token.clone(),item.clone(),"./tmp".to_string()).await?;
+        let mut bar =ProgressBar::new(0);
+        msgraph::download_item(client_ctx.client.clone(), token.clone(),item.clone(),"./tmp".to_string(),&mut bar).await?;
         Ok(())
     }
 

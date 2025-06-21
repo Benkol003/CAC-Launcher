@@ -40,10 +40,7 @@ pub const CONFIG_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
 pub const TMP_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
     CONFIG_FOLDER.join("tmp")
 });
-pub const PENDING_UPDATE_FILE: Lazy<PathBuf> = Lazy::new(|| {
-    CONFIG_FOLDER.join("pending_updates")
-});
-pub const SERVER_MANIFEST_FILE: Lazy<PathBuf> = Lazy::new(|| {
+pub const SERVERS_FILE: Lazy<PathBuf> = Lazy::new(|| {
     CONFIG_FOLDER.join("servers.json")
 });
 pub const CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| {

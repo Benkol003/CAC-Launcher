@@ -30,3 +30,4 @@ delete old/existing folder before unzip
 check that all mods unzip to folder of their name and isnt nested (or add smth to pull folders up)
 try hjson / comments
 panic handler
+handle corrupted config files?

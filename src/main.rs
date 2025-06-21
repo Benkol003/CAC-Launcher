@@ -5,7 +5,7 @@
 
 #![allow(warnings)]
 
-use std::{collections::HashMap, env, fs::{self, File, OpenOptions}, io::{stdin, Read, Write}, path::{Path, PathBuf}, process::exit, sync::{atomic::AtomicBool, Arc}, time::Duration};
+use std::{collections::{hash_map::Iter, HashMap, HashSet}, env, fs::{self, File, OpenOptions}, io::{stdin, Read, Write}, path::{Path, PathBuf}, process::exit, sync::{atomic::AtomicBool, Arc}, time::Duration};
 use anyhow::{anyhow,Error};
 use colored::Colorize;
 use crossterm::event;
@@ -29,8 +29,8 @@ pub struct CACConfig {
     pub arma_path: String,
     //shared between all servers that need it. TODO add to servers.json if a server requires a password (Option<bool> with default?)
     pub server_password: String,
-    pub enabled_optionals: Vec<String>,
-    pub pending_updates: Vec<String>
+    pub enabled_optionals: HashSet<String>,
+    pub pending_updates: HashSet<String>
 }
 
 
@@ -52,7 +52,7 @@ impl CACConfig {
             //TODO enter folder instead not path to exe
             Err(_) => {
                 loop {
-                    ap=ui.popup_text_entry("Enter path to 'arma3_x64.exe'");
+                    ap=ui.popup_text_entry("Enter path to your 'arma3_x64.exe'");
                     match std::fs::metadata(&ap) {
                         Ok(md) => {
                             if(!md.is_file()){
@@ -76,14 +76,14 @@ impl CACConfig {
             arma_path: ap.into(),
             username: whoami::username(),
             server_password: String::new(),
-            enabled_optionals: Vec::new(),
-            pending_updates: Vec::new()
+            enabled_optionals: HashSet::new(),
+            pending_updates: HashSet::new()
         })
     }
 }
 
 
-#[derive(Serialize, Deserialize,Debug,Clone)]
+#[derive(Serialize, Deserialize,Debug,Clone, PartialEq, Eq)]
 #[serde(untagged)]
 pub enum Links {
     single(String),
@@ -106,9 +106,30 @@ pub struct CACContent {
     dlc: HashMap<String,DLC>,
 }
 
+impl CACContent {
+    /// # Returns: combined iterator over all content items in the manifest. 
+    pub fn content_iter<'a>(&'a self) -> impl Iterator<Item = (&'a String,&'a Links)> {
+        self.dlc.iter().map(|x| (x.0,&x.1.link)).chain(self.mods.iter().chain(self.optionals.iter())).into_iter()
+    }
+
+    /// # Returns: combined hashmap of all content items in the manifest.
+    /// TODO: return error if try to exist existing key?
+    pub fn content_map<'a>(&'a self) -> HashMap::<&'a String, &'a Links> {
+        let mut ret = HashMap::<&'a String, &'a Links>::new();
+        ret.extend(self.dlc.iter().map(|x| (x.0,&x.1.link)));
+        ret.extend(self.mods.iter());
+        ret.extend(self.optionals.iter());
+        ret
+    }
+}
+
 
 //TODO UNFINISHED
+/// downloads the latest config, checks for new or updated mod links, and adds pending updates to the app config.
+/// if no config files exist locally then will create them from defaults.
 async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
+
+    tui.popup_message("fetching latest configuration...");
 
     let ctx = build_client_ctx()?;
     let response = ctx.client.get(CONFIG_URL).send().await?;
@@ -148,26 +169,44 @@ async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
     }else{
         old_content = CACContent::default();
         let f = OpenOptions::new().write(true).create(true).open(CONTENT_FILE.as_path())?;
-        serde_json::to_writer_pretty(f, &old_content);
+        serde_json::to_writer_pretty(f, &old_content)?;
     }
+
+    let config_file;
+    if !file_exists(CONFIG_FILE.as_path())? {
+        config_file = CACConfig::default(tui)?;
+        let f = OpenOptions::new().write(true).create(true).open(CONFIG_FILE.as_path())?;
+        serde_json::to_writer_pretty(f, &config_file)?;
+        
+    }
+    let mut config_file = File::open(CONFIG_FILE.as_path())?; 
+    let mut config_content = String::new();
+    config_file.read_to_string(&mut config_content);
+    let mut config = serde_json::from_str::<CACConfig>(&config_content)?;
 
 
     // find changed stuff
     // TODO well you want to flatten the contents aswell to just name:link pairs
     //TODO might want atomic writes and also always truncate everything over
-    let config_file;
-    if !file_exists(CONFIG_FILE.as_path())? {
-        config_file = CACConfig::default(tui)?;
-        let f = OpenOptions::new().write(true).create(true).open(CONFIG_FILE.as_path())?;
-        serde_json::to_writer_pretty(f, &config_file);
-        
-    }
-    let mut config_file = File::open(CONFIG_FILE.as_path())?;
-    let mut config_content = String::new();
-    config_file.read_to_string(&mut config_content);
-    let config = serde_json::from_str::<CACConfig>(&config_content)?;
+    new_content.content_iter().for_each(|nm|{
+        let om = old_content.content_map();
+        if !om.contains_key(nm.0){
+            config.pending_updates.insert(nm.0.clone());
+        }else {
+            let ol = om.get(nm.0).unwrap();
+            if (*ol)!=nm.1{
+                config.pending_updates.insert(nm.0.clone());
+            }   
+            
+        }
+    });
 
-    fs::remove_dir_all(folder_path);
+    let mut config_file = OpenOptions::new().write(true).truncate(true).open(CONFIG_FILE.as_path())?;
+    serde_json::to_writer_pretty(config_file, &config)?;
+
+    fs::copy(folder_path.join("content.json"), CONTENT_FILE.as_path())?;
+    fs::copy(folder_path.join("servers.json"), SERVERS_FILE.as_path())?;
+    fs::remove_dir_all(folder_path)?;
 
     Ok(())
 }
@@ -193,7 +232,7 @@ async fn main() {
 }
 
 async fn fake_main(tui: &mut TUI) -> Result<(), Error> {
-    
+
     force_create_dir(&CONFIG_FOLDER);
     force_create_dir(&CONFIG_FOLDER.join("tmp"));
 
@@ -211,7 +250,6 @@ async fn fake_main(tui: &mut TUI) -> Result<(), Error> {
 
     //also tests if any of the config files are broken. If it is, not my problem to fix that
     update_cac_config(tui).await?; //TODO check if mods list was updated and if so, what.
-    return Ok(());
 
     tui.run().await?;
     

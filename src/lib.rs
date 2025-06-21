@@ -12,10 +12,11 @@ pub mod msgraph;
 pub mod secrets;
 ///utilities for verifying downloaded mods.
 pub mod dirhash;
+///for handling of rendering the terminal UI.
 pub mod UI;
 pub mod servers;
 
-use std::{default, env, fmt::Debug, fs::{remove_file, File}, io::{BufRead, BufReader, Read, Write}, path::{Path, PathBuf}, process::{Command, Stdio}, str::FromStr, sync::{Arc, Mutex}, time::SystemTime, usize};
+use std::{default, env, fmt::Debug, fs::{remove_file, File}, io::{BufRead, BufReader, Read, Write}, path::{Path, PathBuf}, process::{Command, Stdio}, str::FromStr, sync::{Arc, Mutex}, time::{Duration, SystemTime}, usize};
 use anyhow::{anyhow,Error};
 use base64::display;
 use indicatif::{ProgressBar, ProgressStyle};
@@ -32,14 +33,29 @@ use jwalk::WalkDir;
 //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
 pub const PROGRESS_STYLE: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
+
 pub const CONFIG_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
     PathBuf::from("CAC-Config")
 });
 pub const TMP_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
     CONFIG_FOLDER.join("tmp")
 });
+pub const PENDING_UPDATE_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("pending_updates")
+});
+pub const SERVER_MANIFEST_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("servers.json")
+});
+pub const CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("config.json")
+});
+
+pub const CONTENT_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("content.json")
+});
 
 pub static Z7_EXE: &[u8] = include_bytes!("7za.exe");
+pub const TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct FileAutoDeleter(PathBuf);
 
@@ -65,6 +81,12 @@ pub fn force_create_dir(path: &PathBuf) -> Result<(),Error>{
         std::fs::create_dir(path);
     }
     Ok(())
+}
+
+pub fn file_exists<P: AsRef<Path>>(path: P) -> std::io::Result<bool> {
+    if !std::fs::exists(path.as_ref())? {return Ok(false);}
+    let md = std::fs::metadata(path.as_ref())?;
+    Ok(md.is_file())
 }
 
 
@@ -178,7 +200,7 @@ pub fn group_drive_item_archives(drive_items: Vec<SharedDriveItem>) -> Result<Ve
     Ok(items)
 }
 
-pub fn unzip(fname: &str,dest: &str, progress: &mut ProgressBar) -> Result<String,Error> {
+pub fn unzip(fname: &str,dest: &str, mut o_progress: Option<&mut ProgressBar>) -> Result<(),Error> {
     let mut z7_stderr_log: Vec<u8> = Vec::new();
 
     let o_arg = format!("-o{}",dest);
@@ -214,20 +236,32 @@ pub fn unzip(fname: &str,dest: &str, progress: &mut ProgressBar) -> Result<Strin
 
             let (pc,msg) = ln.rsplit_once('%').ok_or(anyhow!("failed to split at %"))?;
             let msg = msg.split_once("-");
-            match msg {
+            match o_progress{
                 None => {},
-                Some(s) => {
-                    progress.set_message(s.1.to_string());
+                Some(ref progress) => {
+                    match msg {
+                        None => {},
+                        Some(s) => {
+                            progress.set_message(s.1.to_string());
+                        }
+                    }
                 }
             }
             let pc = pc.to_string(); let pci: u64 = pc.trim().parse()?;
-            progress.set_position(pci);
+            match o_progress{None =>{},Some(ref progress) =>{
+                progress.set_position(pci);
+            }
+            }
+            
             if r==0 {
                 break;
             }
         }
-        progress.finish_and_clear();
-
+        match o_progress{None =>{},Some(ref progress) =>{
+                progress.finish_and_clear();
+        }
+        }
+    
         let error = z7_run.wait()?;
         if !error.success(){
             let mut reader = BufReader::new(z7_run.stdout.ok_or(anyhow!("failed to get stdout to running process"))?);
@@ -240,11 +274,7 @@ pub fn unzip(fname: &str,dest: &str, progress: &mut ProgressBar) -> Result<Strin
 
             return Err(anyhow!("failed to extract {} (see 7z.log)",fname));
         }
-
-        //return the folder name we extracted to
-        //will get the folder name from the archive name. also works with multipart archives ending in .nnn
-        let regex = Regex::new(r#"^(.*?)\.(?:zip|7z)(?:\.\d{3})?$"#).unwrap();
-        Ok(regex.captures(fname).unwrap().get(1).unwrap().as_str().to_string())
+        Ok(())
 }
 
 pub fn launch_steam() -> Result<(),Error> {

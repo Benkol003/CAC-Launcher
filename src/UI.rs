@@ -1,14 +1,13 @@
 use std::{collections::HashMap, io::{ self, stdout, Stdout, Write }, rc::Rc, sync::{atomic::AtomicBool, Arc, Mutex}, time::Duration};
-
+use std::cmp::max;
 use a2s::info::Info;
 use anyhow::Error;
 use indicatif::TermLike;
 use ratatui::{
-    layout::{ Alignment, Constraint, Flex, Layout, Rect }, prelude::CrosstermBackend, style::{Style, Stylize}, symbols, text::{ Text, ToLine, ToText }, widgets::{Block, Padding, Paragraph, Row, Table, Tabs, Widget}, Terminal
+    layout::{ Alignment, Constraint, Flex, Layout, Position, Rect }, prelude::CrosstermBackend, style::{Style, Stylize}, symbols, text::{ Text, ToLine, ToText }, widgets::{Block, Padding, Paragraph, Row, Table, Tabs, Widget}, Terminal
 };
 use crossterm::{
-    event::{ self, read, Event, KeyCode, KeyEventKind, MouseEventKind },
-    ExecutableCommand,
+    cursor::SetCursorStyle, event::{ self, read, Event, KeyCode, KeyEventKind, MouseEventKind }, execute, terminal::disable_raw_mode, ExecutableCommand
 };
 
 use std::cell::{Cell,RefCell};
@@ -21,8 +20,8 @@ fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
     area
 }
 
-/// helper struct for indicatif's ProgressBar, so 
-/// 
+/// helper struct for indicatif's `ProgressBar`, so can run this asynchronously of a UI widget.
+/// take a ref to `buffer` before passing this struct to`ProgressBar::render_target`.
 #[derive(Debug)]
 pub struct ProgressBarBuffer {
         pub width: Mutex<Cell<u16>>,
@@ -91,6 +90,7 @@ pub struct TUI {
     pub term: Terminal<CrosstermBackend<Stdout>>,
 }
 
+/// UI elements that are aysn
 impl TUI {
     pub fn new() -> Self {
         std::io::stdout().execute(crossterm::event::EnableMouseCapture).unwrap();
@@ -101,8 +101,78 @@ impl TUI {
         }
     }
 
-    /// blocking. TODO REMOVE
-    pub fn popup_progress(&mut self, pbuf: Arc<Mutex<RefCell<String>>>,finish: Arc<AtomicBool>) {
+    pub fn popup_text_entry(&mut self, message: &str) -> String {
+        let block = Block::bordered();
+
+        // txt.push_line("Press C to cancel".to_line().white());
+        // let panel = Paragraph::new(txt.clone()).block(block).centered();
+
+        let mut cur = 0;
+        let mut buf = String::new();
+        self.term.clear();
+        loop {
+            let block = Block::bordered().title_top(message.clone()).title_bottom("Press Enter to Submit").title_alignment(Alignment::Center);
+            let panel = Paragraph::new(buf.clone()).block(block);
+
+            self.term.draw(|x| {
+                let rect = center(
+                            x.area(),
+                            Constraint::Length(max((message.len()+2) as u16,max(50, (panel.line_width() + 2) as u16))),
+                            Constraint::Length((3) as u16) //TODO line wraps
+                        );
+                
+                panel
+                    .clone()
+                    .render(
+                        rect,
+                        x.buffer_mut()
+                    );
+                    execute!(io::stdout(),SetCursorStyle::BlinkingBar);
+                    x.set_cursor_position(Position::new((rect.left()+1+(cur as u16)),(rect.top()+1) as u16));
+            });
+
+            let event = read().unwrap();
+            if event.is_key_press() {
+                let event = event.as_key_press_event().unwrap();
+                match event.code {
+                    KeyCode::Char(c) => {
+                        buf.insert(cur, c);
+                        cur+=1;
+                    }
+                    KeyCode::Enter => {
+                        return buf;
+                    }
+                    KeyCode::Left => {
+                        if cur>0 {
+                            cur-=1;
+                        }
+                    }
+                    KeyCode::Right => {
+                        if cur<buf.len(){
+                            cur+=1;
+                        }
+                    }
+                    KeyCode::Backspace => {
+                        if cur>0{
+                            buf.remove(cur-1);
+                            cur-=1;
+                        }
+                    }
+                    KeyCode::Delete => {
+                        if cur>=0 && cur<buf.len(){
+                            buf.remove(cur);
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
+
+    ///this function blocks until recieves finish signal or user requesta to cancel.
+    /// # Returns:
+    /// false if task was cancelled.
+    pub fn popup_progress(&mut self, pbuf: Arc<Mutex<RefCell<String>>>,finish: Arc<AtomicBool>) -> bool {
         let mut prev_len =0;
         loop {
             let panel: Paragraph;
@@ -111,7 +181,7 @@ impl TUI {
                 let lock = pbuf.lock().unwrap();
                 v = lock.borrow().clone();
             }
-            let block = Block::bordered();
+            let block = Block::bordered().title_bottom("Press C to cancel").title_alignment(Alignment::Center);
             if v.len()==0 {
                     log::warn!("detected ProgressBarBuffer len==0 (bug to fix)"); //TODO why is this happening...
                     continue;
@@ -120,7 +190,6 @@ impl TUI {
                 self.term.clear();
             }
             prev_len = v.len();
-
                 panel = Paragraph::new(v).block(block).centered();
             self.term.draw(|x| {
                 let width = panel.line_width() as u16;
@@ -139,18 +208,21 @@ impl TUI {
             if crossterm::event::poll(Duration::from_millis(0)).unwrap(){
                 let e = crossterm::event::read().unwrap();
                 if e.is_key_press() {
-                return;
+                    let e = e.as_key_press_event().unwrap();
+                    if e.code == KeyCode::Char('c'){
+                        return false;
+                    }
                 }
             }
             if finish.load(std::sync::atomic::Ordering::Relaxed) {
-                return;
+                return true;
             }
         }
     }
 
     /// this function will block until user enters any key input to the popup prompt.
     /// border shrinks to fit lines of text. there is no limit on the maximum text line size.
-    fn popup_blocking_prompt(&mut self, txt: &mut Text) {
+    pub fn popup_blocking_prompt(&mut self, mut txt: Text) {
         let block = Block::bordered();
         txt.push_line("press any key to continue...".to_line().white());
         let panel = Paragraph::new(txt.clone()).block(block).centered();
@@ -189,7 +261,7 @@ impl TUI {
        If any mods are outdated, please redownload them later from the menu."
                 .to_text()
                 .light_yellow();
-        self.popup_blocking_prompt(&mut txt);
+        self.popup_blocking_prompt(txt);
     }
 
     pub fn main_menu<'a>(&self, titles: &'a Vec<&str>) -> Tabs<'a> {
@@ -285,5 +357,6 @@ impl Drop for TUI {
         self.term.clear();
         self.term.show_cursor();
         self.term.set_cursor_position((0, 0));
+        disable_raw_mode();
     }
 }

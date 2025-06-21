@@ -8,6 +8,7 @@
             "program": "${workspaceRoot}/target/debug/main.exe",
             "args": [],
             "cwd": "${workspaceRoot}/",
+            "preLaunchTask": "rust: cargo build"
         },
 
                 {

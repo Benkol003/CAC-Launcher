@@ -6,6 +6,7 @@ use colored::Colorize;
 use indicatif::{ProgressBar, ProgressStyle};
 use src_backend::{msgraph::SharedDriveItem, *};
 use tokio::task::JoinSet;
+use tokio_util::sync::CancellationToken;
 
 #[derive(Parser, Debug)]
 #[command(version, about)]
@@ -19,6 +20,7 @@ struct Args {
 }
 
 //TODO: add suppport for also reading the modlist json config
+//TODO: add command to clean partial downloads
 #[derive(Parser, Debug)]
 #[group(required = true, multiple = false)]
 struct ArgsGroup {
@@ -31,9 +33,18 @@ struct ArgsGroup {
 
 }
 
-//TODO remove duplicates
 #[tokio::main]
 async fn main() -> Result<(),Error> {
+    //std::env::set_var("RUST_BACKTRACE", "1");
+
+    let _shutdown = CancellationToken::new();
+    let shutdown = _shutdown.clone();
+    tokio::spawn(async move {
+    tokio::signal::ctrl_c().await.unwrap();
+    println!("Ctrl+C recieved, exiting...");
+    _shutdown.cancel();
+    });
+
 
     let args = Args::parse();
     let ctx = build_client_ctx()?;
@@ -83,23 +94,30 @@ async fn main() -> Result<(),Error> {
     //TODO 
     // limit number of running downloads. unzip can be parralel, but all previous downloads for a split archive need to be downloaded first
     for item in &items {
+        let mut archive0: Option<PathBuf> = None;
+        let mut parts_remove: Vec<PathBuf> = Vec::new();
         for part in &item.1 {
             let mut progress = ProgressBar::new(0).with_style(ProgressStyle::with_template(PROGRESS_STYLE)?);//TODO static assert usize::MAX<= u64::MAX
-            msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone(),&mut progress).await?;
+            let p =msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone(),&mut progress, shutdown.clone()).await?;
+            if archive0.is_none(){
+                archive0 = Some(p.clone());
+            }
+            parts_remove.push(p);
         }
 
         //7zip will automatically find and extract the remaining parts
-
-        //TODO pathbuf is fucking awful.
         let mut z7_progress = ProgressBar::new_spinner().with_style(
             ProgressStyle::with_template("{spinner} Extracting: {percent}% Elapsed: {elapsed}, ETA: {eta} {msg:.green.bold}")?);
         z7_progress.set_length(100);
-        unzip([args.output_dir.clone(),item.1[0].name.clone()].iter().collect::<PathBuf>().to_str().unwrap(),".",&mut z7_progress)?;
+
+        //TODO delete the old folder before unzipping if present
+        
+        unzip(archive0.unwrap().as_os_str().to_str().unwrap(),".",Some(&mut z7_progress))?;
         println!("{}",format!("Extracted {}",&item.1[0].name).bold().green());
 
         //remove archive or all partial archives
-        for f in &item.1 {
-            fs::remove_file([args.output_dir.clone(),f.name.clone()].iter().collect::<PathBuf>())?;
+        for p in parts_remove {
+            fs::remove_file(p)?;
         }
     }
     

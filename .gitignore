@@ -10,3 +10,5 @@ src/secrets.rs
 7za.exe
 CAC-Config
 *.log
+*.exe
+*.pdb

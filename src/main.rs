@@ -5,7 +5,7 @@
 
 #![allow(warnings)]
 
-use std::{collections::{hash_map::Iter, HashMap, HashSet}, env, fs::{self, File, OpenOptions}, io::{stdin, Read, Write}, path::{Path, PathBuf}, process::exit, sync::{atomic::AtomicBool, Arc}, time::Duration};
+use std::{collections::{hash_map::Iter, HashMap, HashSet}, env, fs::{self, File, OpenOptions}, io::{stdin, Read, Write}, panic::PanicHookInfo, path::{Path, PathBuf}, process::exit, sync::{atomic::AtomicBool, Arc}, time::Duration};
 use anyhow::{anyhow,Error};
 use colored::Colorize;
 use crossterm::event;
@@ -17,112 +17,11 @@ use reqwest::{header::CONTENT_DISPOSITION, Url};
 use serde::{Serialize,Deserialize};
 use serde_json::Value;
 use simplelog::{Config, WriteLogger};
-use src_backend::{msgraph::SharedDriveItem, servers, UI::{self, ProgressBarBuffer, TUI}, *};
+use src_backend::{configs::{CACConfig, CACContent}, msgraph::SharedDriveItem, servers, UI::{self, ProgressBarBuffer, TUI}, *};
 use tokio::time::sleep;
+use tokio_util::sync::CancellationToken;
 
 static CONFIG_URL: &str = "https://github.com/Benkol003/CAC-Config/archive/master.zip";
-
-#[derive(Serialize, Deserialize, Debug, Clone)]
-#[serde(rename_all = "camelCase")]
-pub struct CACConfig {
-    pub username: String,
-    pub arma_path: String,
-    //shared between all servers that need it. TODO add to servers.json if a server requires a password (Option<bool> with default?)
-    pub server_password: String,
-    pub enabled_optionals: HashSet<String>,
-    pub pending_updates: HashSet<String>
-}
-
-
-impl CACConfig {
-    // fn import_caccore() -> Self {
-    //     //TODO: need to find arma directory first / get from user ./CACCore
-    // }
-
-    fn default(ui: &mut TUI) -> Result<Self,Error> {
-        //find arma
-        let mut ap = "./arma3_x64.exe".to_string();
-        match std::fs::metadata(&ap) {
-            Ok(md) => {
-                if(!md.is_file()){
-                    return Err(anyhow!("found arma at './arma3_x64.exe' but it is not a file")); //TODO not a fatal error?
-                } 
-            }
-            
-            //TODO enter folder instead not path to exe
-            Err(_) => {
-                loop {
-                    ap=ui.popup_text_entry("Enter path to your 'arma3_x64.exe'");
-                    match std::fs::metadata(&ap) {
-                        Ok(md) => {
-                            if(!md.is_file()){
-                                ui.popup_blocking_prompt(format!("'{}' is not a file, try again.",ap).into());
-                                continue;
-                            }
-                            else{
-                                break;
-                            }
-                        }
-                        Err(_) => {
-                            ui.popup_blocking_prompt(format!("'{}' does not exist, try again.",ap).into());
-                            continue;
-                        }   
-                    }
-                }
-            }
-        }
-
-        Ok(CACConfig {
-            arma_path: ap.into(),
-            username: whoami::username(),
-            server_password: String::new(),
-            enabled_optionals: HashSet::new(),
-            pending_updates: HashSet::new()
-        })
-    }
-}
-
-
-#[derive(Serialize, Deserialize,Debug,Clone, PartialEq, Eq)]
-#[serde(untagged)]
-pub enum Links {
-    single(String),
-    multilink(Vec<String>),
-}
-
-#[derive(Serialize, Deserialize,Debug,Clone)]
-pub struct DLC {
-    link: Links,
-    pwd: String,
-    description: String
-}
-
-#[derive(Serialize, Deserialize, Debug, Clone,Default)]
-#[serde(rename_all = "camelCase")]
-pub struct CACContent {
-    mods : HashMap<String,Links>,
-    optionals: HashMap<String,Links>,
-    //TODO: arma base game
-    dlc: HashMap<String,DLC>,
-}
-
-impl CACContent {
-    /// # Returns: combined iterator over all content items in the manifest. 
-    pub fn content_iter<'a>(&'a self) -> impl Iterator<Item = (&'a String,&'a Links)> {
-        self.dlc.iter().map(|x| (x.0,&x.1.link)).chain(self.mods.iter().chain(self.optionals.iter())).into_iter()
-    }
-
-    /// # Returns: combined hashmap of all content items in the manifest.
-    /// TODO: return error if try to exist existing key?
-    pub fn content_map<'a>(&'a self) -> HashMap::<&'a String, &'a Links> {
-        let mut ret = HashMap::<&'a String, &'a Links>::new();
-        ret.extend(self.dlc.iter().map(|x| (x.0,&x.1.link)));
-        ret.extend(self.mods.iter());
-        ret.extend(self.optionals.iter());
-        ret
-    }
-}
-
 
 //TODO UNFINISHED
 /// downloads the latest config, checks for new or updated mod links, and adds pending updates to the app config.
@@ -131,7 +30,7 @@ async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
 
     tui.popup_message("fetching latest configuration...");
 
-    let ctx = build_client_ctx()?;
+    let ctx = ClientCtx::build()?;
     let response = ctx.client.get(CONFIG_URL).send().await?;
 
     if(!response.status().is_success()) {
@@ -157,15 +56,15 @@ async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
     let mut new_conf_file = File::open(folder_path.join("content.json"))?;
     let mut new_conf_content = String::new(); 
     new_conf_file.read_to_string(&mut new_conf_content)?;
-    let new_content = serde_json::from_str::<CACContent>(&mut new_conf_content)?;
+    let new_content = serde_json::from_str::<CACContent>(&new_conf_content)?;
 
     // open old existing content.json
     let old_content;
-    if file_exists(CONTENT_FILE.as_path())? {
+    if CONTENT_FILE.as_path().is_file() {
         let mut old_conf_file = File::open(CONTENT_FILE.as_path())?;
         let mut old_conf_content = String::new(); 
         old_conf_file.read_to_string(&mut old_conf_content)?;
-        old_content = serde_json::from_str::<CACContent>(&mut old_conf_content)?;
+        old_content = serde_json::from_str::<CACContent>(&old_conf_content)?;
     }else{
         old_content = CACContent::default();
         let f = OpenOptions::new().write(true).create(true).open(CONTENT_FILE.as_path())?;
@@ -173,7 +72,7 @@ async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
     }
 
     let config_file;
-    if !file_exists(CONFIG_FILE.as_path())? {
+    if !CONFIG_FILE.as_path().is_file() {
         config_file = CACConfig::default(tui)?;
         let f = OpenOptions::new().write(true).create(true).open(CONFIG_FILE.as_path())?;
         serde_json::to_writer_pretty(f, &config_file)?;
@@ -211,6 +110,19 @@ async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
     Ok(())
 }
 
+fn panic_handler(info: &PanicHookInfo) {
+
+    let loc = match info.location() {
+        None => { "(Unknown)".to_string()},
+        Some(s) => {s.to_string()}
+    };
+
+    log::error!("panic occured: {:?}",loc);
+
+    let mut tui = TUI::new();
+    tui.popup_blocking_prompt(vec![Line::from(vec!["panic occured @: ".light_red(),loc.into(),]),"this location has been added to CAC-Launcher.log".light_yellow().into()].into());
+}
+
 #[tokio::main]
 async fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
@@ -218,6 +130,8 @@ async fn main() {
     //TODO logger doesnt work
     WriteLogger::init(simplelog::LevelFilter::Warn, Config::default(), File::create("CAC-Launcher.log").unwrap());
     let mut tui = TUI::new();
+
+    std::panic::set_hook(Box::new(panic_handler));
 
     match fake_main(&mut tui).await {
     Ok(_) => {},
@@ -236,10 +150,8 @@ async fn fake_main(tui: &mut TUI) -> Result<(), Error> {
     force_create_dir(&CONFIG_FOLDER);
     force_create_dir(&CONFIG_FOLDER.join("tmp"));
 
-
-
     if !std::fs::exists(CONTENT_FILE.as_path())? {
-        tui.warn_unkown_mod_state();
+        tui.warn_unknown_mod_state();
     }
 
     let _z7 = FileAutoDeleter::new("7za.exe"); //allows file to be deleted automatically even if theres an error
@@ -252,7 +164,8 @@ async fn fake_main(tui: &mut TUI) -> Result<(), Error> {
     update_cac_config(tui).await?; //TODO check if mods list was updated and if so, what.
 
     tui.run().await?;
-    
+    tui.popup_message(UI::LOGO);
+    tokio::time::sleep(Duration::from_secs(1)).await;
     Ok(())
 }
 

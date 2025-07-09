@@ -35,7 +35,7 @@ struct ArgsGroup {
 
 #[tokio::main]
 async fn main() -> Result<(),Error> {
-    //std::env::set_var("RUST_BACKTRACE", "1");
+    std::env::set_var("RUST_BACKTRACE", "1");
 
     let _shutdown = CancellationToken::new();
     let shutdown = _shutdown.clone();
@@ -47,7 +47,7 @@ async fn main() -> Result<(),Error> {
 
 
     let args = Args::parse();
-    let ctx = build_client_ctx()?;
+    let ctx = ClientCtx::build()?;
     let token = msgraph::login(&ctx.client).await?;
     let mut urls: Vec<String> = Vec::new();
     if let Some(path) = args.args.file_url_list {
@@ -97,7 +97,7 @@ async fn main() -> Result<(),Error> {
         let mut archive0: Option<PathBuf> = None;
         let mut parts_remove: Vec<PathBuf> = Vec::new();
         for part in &item.1 {
-            let mut progress = ProgressBar::new(0).with_style(ProgressStyle::with_template(PROGRESS_STYLE)?);//TODO static assert usize::MAX<= u64::MAX
+            let mut progress = ProgressBar::new(0).with_style(ProgressStyle::with_template(PROGRESS_STYLE_DOWNLOAD)?);//TODO static assert usize::MAX<= u64::MAX
             let p =msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone(),&mut progress, shutdown.clone()).await?;
             if archive0.is_none(){
                 archive0 = Some(p.clone());
@@ -107,7 +107,7 @@ async fn main() -> Result<(),Error> {
 
         //7zip will automatically find and extract the remaining parts
         let mut z7_progress = ProgressBar::new_spinner().with_style(
-            ProgressStyle::with_template("{spinner} Extracting: {percent}% Elapsed: {elapsed}, ETA: {eta} {msg:.green.bold}")?);
+            ProgressStyle::with_template(PROGRESS_STYLE_EXTRACT)?);
         z7_progress.set_length(100);
 
         //TODO delete the old folder before unzipping if present

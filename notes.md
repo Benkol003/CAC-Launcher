@@ -24,10 +24,19 @@ partial downloads are named with id+cTag to avoid resuming a download on a diffe
 the app can also use the mod references in the server manifest to know when a server needs updates before launch
 
 ### TODO
+search for TODO in the src, otherwise:
+
 what MSVC redists are needed to install with the base game
 concurrent {download->unzip}'s in the downloader and for ProgressBarBuffer/UI::popup_progress
 delete old/existing folder before unzip
 check that all mods unzip to folder of their name and isnt nested (or add smth to pull folders up)
 try hjson / comments
-panic handler
 handle corrupted config files?
+
+Search for arma3_x64.exe
+path for arma3_x64.exe wont work if wrapped in quotes
+also accept the folder its in?
+ask for mod dir
+one point of truth for opening and writing config files (maybe lock aswell)
+validate after a download that the downloaded folder name matches what the mod is called (or write a tester to download + probe archive contents)
+7za.exe progress information in unzip() no longer works

@@ -15,11 +15,13 @@ pub mod dirhash;
 ///for handling of rendering the terminal UI.
 pub mod UI;
 pub mod servers;
+pub mod configs;
 
 use std::{default, env, fmt::Debug, fs::{remove_file, File}, io::{BufRead, BufReader, Read, Write}, path::{Path, PathBuf}, process::{Command, Stdio}, str::FromStr, sync::{Arc, Mutex}, time::{Duration, SystemTime}, usize};
 use anyhow::{anyhow,Error};
 use base64::display;
 use indicatif::{ProgressBar, ProgressStyle};
+use log::{error, info, warn};
 use msgraph::SharedDriveItem;
 use once_cell::unsync::{Lazy, OnceCell};
 use regex::{bytes::Match, Regex};
@@ -32,7 +34,8 @@ use jwalk::WalkDir;
 
 //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
-pub const PROGRESS_STYLE: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
+pub const PROGRESS_STYLE_DOWNLOAD: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
+pub const PROGRESS_STYLE_EXTRACT: &str = "{spinner} Extracting: {percent}% Elapsed: {elapsed}, ETA: {eta} {msg:.green.bold}";
 
 pub const CONFIG_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
     PathBuf::from("CAC-Config")
@@ -79,13 +82,6 @@ pub fn force_create_dir(path: &PathBuf) -> Result<(),Error>{
     }
     Ok(())
 }
-
-pub fn file_exists<P: AsRef<Path>>(path: P) -> std::io::Result<bool> {
-    if !std::fs::exists(path.as_ref())? {return Ok(false);}
-    let md = std::fs::metadata(path.as_ref())?;
-    Ok(md.is_file())
-}
-
 
 pub struct DownloadInfo {
         pub sessionUrl: Url,
@@ -156,21 +152,23 @@ pub struct ClientCtx {
     pub jar: Arc<CookieStoreRwLock>
 }
 
-pub fn build_client_ctx() -> Result<ClientCtx,Error> {
-    let mut headers = reqwest::header::HeaderMap::new();
-    headers.insert("user-agent",USER_AGENT.parse()?);
+impl ClientCtx {
+    pub fn build() -> Result<Self,Error> {
+        let mut headers = reqwest::header::HeaderMap::new();
+        headers.insert("user-agent",USER_AGENT.parse()?);
 
-    let jar = Arc::new(CookieStoreRwLock::new(CookieStore::new(None)));
-    let clientCtx = ClientCtx{
-        client: reqwest::Client::builder()
-        .cookie_provider(jar.clone())
-        .default_headers(headers)
-        .redirect(Policy::limited(10))
-        .use_native_tls()
-        .build()?,
-        jar: jar
-    };
-    Ok(clientCtx)
+        let jar = Arc::new(CookieStoreRwLock::new(CookieStore::new(None)));
+        let clientCtx = ClientCtx{
+            client: reqwest::Client::builder()
+            .cookie_provider(jar.clone())
+            .default_headers(headers)
+            .redirect(Policy::limited(10))
+            .use_native_tls()
+            .build()?,
+            jar: jar
+        };
+        Ok(clientCtx)
+    }
 }
 
 /// Given a vec of drive items, will group partial archives by their full archive name (without the .nnn extension). Single archives are just a vec of one element
@@ -198,6 +196,16 @@ pub fn group_drive_item_archives(drive_items: Vec<SharedDriveItem>) -> Result<Ve
 }
 
 pub fn unzip(fname: &str,dest: &str, mut o_progress: Option<&mut ProgressBar>) -> Result<(),Error> {
+    match o_progress {
+        None => {},
+        Some(ref progress) => {
+            progress.set_style(ProgressStyle::with_template(PROGRESS_STYLE_DOWNLOAD)?);
+            progress.set_message("Unzipping...");
+            progress.set_length(100);
+            progress.set_position(0);
+        }
+    }
+    
     let mut z7_stderr_log: Vec<u8> = Vec::new();
 
     let o_arg = format!("-o{}",dest);

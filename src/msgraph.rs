@@ -22,7 +22,7 @@ use reqwest::{
     get, header::{ self, HeaderMap, CONTENT_LENGTH, CONTENT_TYPE, HOST, RANGE }, Client, StatusCode, Url, Version
 };
 
-use crate::{secrets, PROGRESS_STYLE, TIMEOUT};
+use crate::{secrets, PROGRESS_STYLE_DOWNLOAD, TIMEOUT};
 
 const TENANT_ID: &str = "4fd01353-8fd7-4a18-a3a1-7cd70f528afa";
 const APP_CLIENT_ID: &str = "9ecaa0e8-9caf-4f49-94e8-8430bbf57486";
@@ -125,6 +125,7 @@ pub async fn get_shared_drive_item(
 /// downloads will be resumed later after a cancel if you attempt to download the same drive item to the same destination folder.
 /// TODO: if there is a folder with the same name as the download file...
 pub async fn download_item(client: Client, token: String, item: SharedDriveItem,dest_folder: String,progress: &mut ProgressBar, cancel: CancellationToken) -> Result<PathBuf, Error> {
+    progress.set_style(ProgressStyle::with_template(PROGRESS_STYLE_DOWNLOAD)?);
     let dest_folder = Path::new(dest_folder.as_str());
     std::fs::create_dir_all(dest_folder)?;
 

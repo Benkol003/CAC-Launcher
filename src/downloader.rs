@@ -94,15 +94,11 @@ async fn main() -> Result<(),Error> {
     //TODO 
     // limit number of running downloads. unzip can be parralel, but all previous downloads for a split archive need to be downloaded first
     for item in &items {
-        let mut archive0: Option<PathBuf> = None;
-        let mut parts_remove: Vec<PathBuf> = Vec::new();
+        let mut parts: Vec<PathBuf> = Vec::new();
         for part in &item.1 {
             let mut progress = ProgressBar::new(0).with_style(ProgressStyle::with_template(PROGRESS_STYLE_DOWNLOAD)?);//TODO static assert usize::MAX<= u64::MAX
             let p =msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone(),&mut progress, shutdown.clone()).await?;
-            if archive0.is_none(){
-                archive0 = Some(p.clone());
-            }
-            parts_remove.push(p);
+            parts.push(p);
         }
 
         //7zip will automatically find and extract the remaining parts
@@ -111,12 +107,13 @@ async fn main() -> Result<(),Error> {
         z7_progress.set_length(100);
 
         //TODO delete the old folder before unzipping if present
+        //TODO double check getting archive .000
         
-        unzip(archive0.unwrap().as_os_str().to_str().unwrap(),".",Some(&mut z7_progress))?;
+        unzip(parts.get(0).unwrap().as_os_str().to_str().unwrap(),".",Some(&mut z7_progress))?;
         println!("{}",format!("Extracted {}",&item.1[0].name).bold().green());
 
         //remove archive or all partial archives
-        for p in parts_remove {
+        for p in parts {
             fs::remove_file(p)?;
         }
     }

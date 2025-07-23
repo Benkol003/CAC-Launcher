@@ -46,7 +46,7 @@ mod tests {
     async fn url_redirect() -> Result<(), Error> {
         let url = "https://tinyurl.com/uvs5dkdj";
         let client_ctx = ClientCtx::build()?;
-        let response = client_ctx.client.get(url).send().await?;
+        let response = client_ctx.client.get(url).timeout(TIMEOUT).send().await?;
 
         let new_url = response.url();
         println!("final url: {}", new_url);

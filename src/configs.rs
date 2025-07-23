@@ -1,7 +1,46 @@
-use std::{collections::{HashMap, HashSet}, fs::File, io::Read, path::{self, PathBuf}};
-use crate::{CONFIG_FILE, CONTENT_FILE, UI::TUI};
+use std::{collections::{HashMap, HashSet}, fs::{File, OpenOptions}, io::Read, path::{self, PathBuf}};
+use crate::{UI::TUI};
 use anyhow::{anyhow,Error};
+use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
+
+pub const CONFIG_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
+    PathBuf::from("CAC-Config")
+});
+pub const TMP_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("tmp")
+});
+
+pub const SERVERS_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("servers.json")
+});
+pub const CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("config.json")
+});
+
+pub const CONTENT_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("content.json")
+});
+
+pub trait Config: Serialize + for<'de> Deserialize<'de> {
+    fn file_path() -> PathBuf;
+    fn save(&self) -> Result<(),Error> {
+        let f = OpenOptions::new().truncate(true).write(true).create(true).open(Self::file_path())?;
+        serde_json::to_writer_pretty(f, &self)?;
+        Ok(())
+    }
+
+    fn _read(path: PathBuf) -> Result<Self,Error> {
+        let mut config_buf = String::new();
+        let mut config_file = File::open(Self::file_path())?;
+        config_file.read_to_string(&mut config_buf)?;
+        Ok(serde_json::from_str::<Self>(config_buf.as_str())?)
+    }
+
+    fn read() -> Result<Self,Error> {
+        Self::_read(Self::file_path())
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -16,14 +55,13 @@ pub struct CACConfig {
     mod_dir: String //access via absolute_mod_dir instead 
 }
 
-impl CACConfig {
-    pub fn read() -> Result<Self,Error> {
-        let mut config_buf = String::new();
-        let mut config_file = File::open(CONFIG_FILE.as_path())?;
-        config_file.read_to_string(&mut config_buf)?;
-        Ok(serde_json::from_str::<CACConfig>(&config_buf)?)
+impl Config for CACConfig {
+    fn file_path() -> PathBuf {
+        CONFIG_FILE.to_path_buf()
     }
+}
 
+impl CACConfig {
     pub fn absolute_mod_dir(&self) -> Result<PathBuf,Error> {
         //arma will crash if moddir contains relative e.g. "./" ("Mods/ is fine"), so resolve if is the case
         //dont store the absolute path though, then can move folders around without stuff breaking
@@ -155,7 +193,18 @@ pub struct CACContent {
     pub dlc: HashMap<String,DLC>,
 }
 
+impl Config for CACContent {
+    fn file_path() -> PathBuf {
+        CONTENT_FILE.to_path_buf()
+    }
+}
+
 impl CACContent {
+
+    pub fn read_from(path: PathBuf) -> Result<Self,Error> {
+        Self::_read(path)
+    }
+
     /// # Returns: combined iterator over all content items in the manifest. 
     pub fn content_iter<'a>(&'a self) -> impl Iterator<Item = (&'a String,&'a Links)> {
         self.dlc.iter().map(|x| (x.0,&x.1.link)).chain(self.mods.iter().chain(self.optionals.iter())).into_iter()
@@ -169,13 +218,6 @@ impl CACContent {
         ret.extend(self.mods.iter());
         ret.extend(self.optionals.iter());
         ret
-    }
-
-    pub fn read() -> Result<Self,Error> {
-        let mut config_buf = String::new();
-        let mut config_file = File::open(CONTENT_FILE.as_path())?;
-        config_file.read_to_string(&mut config_buf)?;
-        Ok(serde_json::from_str::<CACContent>(&config_buf)?)
     }
     
 }

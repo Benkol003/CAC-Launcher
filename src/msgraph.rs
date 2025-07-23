@@ -85,7 +85,7 @@ pub enum FsEntryType {
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0&tabs=http)
 async fn get_encoded_sharing_url(client: &Client, url: &str) -> Result<String, Error> {
-    let response = client.get(url).send().await?;
+    let response = client.get(url).timeout(TIMEOUT).send().await?;
     let final_url = response.url().as_str();
     return Ok(format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(final_url)));
 }
@@ -107,6 +107,7 @@ pub async fn get_shared_drive_item(
     let mut response = client
         .get(format!("{}shares/{}/driveItem", MSAPI_URL, share_id))
         .headers(headers)
+        .timeout(TIMEOUT)
         .send().await?;
     if response.status().as_u16() != 200 {
         return Err(
@@ -164,6 +165,9 @@ pub async fn download_item(client: Client, token: String, item: SharedDriveItem,
     let mut response = client
         .get(format!("{}shares/{}/driveItem/content", MSAPI_URL, item.share_id))
         .headers(headers)
+        //we cant disable the timeout by passing None
+        //https://github.com/seanmonstar/reqwest/issues/1366
+        .timeout(Duration::MAX) //unset timeout as dont know how long large files will take. instead timeout for recieving data blocks
         .send().await?;
 
     if(!response.status().is_success()) {
@@ -194,9 +198,9 @@ pub async fn download_item(client: Client, token: String, item: SharedDriveItem,
                 file.write(&buf[..readBytes])?;
                 progress.inc(readBytes as u64);
             }
-        _ = sleep(TIMEOUT)=> {
-            return Err(anyhow!("download connection timed out."));
-        }
+            _ = sleep(TIMEOUT) => {
+                return Err(anyhow!("download timed out"));
+            }  
         };
 
     }
@@ -218,6 +222,7 @@ pub async fn login(client: &Client) -> Result<String, Error> {
         .header(HOST, "login.microsoftonline.com")
         .header(CONTENT_TYPE, "application/x-www-form-urlencoded")
         .form(&params)
+        .timeout(TIMEOUT)
         .send().await?;
 
     if response.status().is_success() {

@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, fmt::Display, fs::OpenOptions, io::{ self, stdout, Stdout, Write }, path::PathBuf, rc::Rc, sync::{ atomic::AtomicBool, Arc, Mutex }, time::Duration
+    cmp::Ordering, collections::HashMap, fmt::Display, fs::OpenOptions, io::{ self, stdout, Stdout, Write }, path::PathBuf, rc::Rc, sync::{ atomic::AtomicBool, Arc, Mutex }, time::Duration
 };
 use std::cmp::{max,min};
 use a2s::info::Info;
@@ -28,18 +28,17 @@ use tokio_util::sync::CancellationToken;
 
 use std::cell::{ Cell, RefCell };
 
-use crate::{configs::{CACConfig, CACContent, Links}, msgraph, servers::{ self, Server }, unzip, ClientCtx, CONFIG_FILE, PROGRESS_STYLE_DOWNLOAD, TMP_FOLDER};
+use crate::{configs::{CACConfig, CACContent, Config, Links, TMP_FOLDER}, download::download_items, msgraph, servers::{ self, Server }, unzip, ClientCtx, PROGRESS_STYLE_DOWNLOAD, PROGRESS_STYLE_MESSAGE};
 
 pub const LOGO: &str =
 r###"
-_____          _____ _                            _               
-/ ____|   /\   / ____| |  discord.gg/dNGcyEYK8F   | |              
+  _____          _____ _                            _               
+ / ____|   /\   / ____| |                          | |              
 | |       /  \ | |    | |     __ _ _   _ _ __   ___| |__   ___ _ __ 
 | |      / /\ \| |    | |    / _` | | | | '_ \ / __| '_ \ / _ \ '__|
 | |____ / ____ \ |____| |___| (_| | |_| | | | | (__| | | |  __/ |   
-\_____/_/    \_\_____|______\__,_|\__,_|_| |_|\___|_| |_|\___|_|   
+ \_____/_/    \_\_____|______\__,_|\__,_|_| |_|\___|_| |_|\___|_|   
     Made by UnladenCoconut 
-
 "###;
 
 fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
@@ -124,40 +123,82 @@ struct ServerMenu {
 impl ServerMenu {
 
     /// constructs the widget to render
-    fn make<'a>(&self) -> Table<'a> {
+    fn make<'a>(&mut self) -> Result<Table<'a>,Error> {
+        //self.status.sort_by();
+        
+        let missing_mods_msg = "missing mods".to_string();
+        let update_required_msg: String = "update required".to_string();
+        let offline_msg: String = "[Offline]".to_string();
+
+        let config = CACConfig::read()?;
+        let servers = servers::read_config()?;
+
         let ret = Table::new(
             self.status
                 .iter()
                 .map(|(k, v)| {
                     Row::new(
-                        vec![k.clone(), match v {
+                        vec![k.clone(), 
+                        //status column
+                        match v {
                             Some(v) => { format!("[{}/{}]",v.players, v.max_players) }
-                            None => { "[Offline]".into() }
-                        }]
+                            None => { offline_msg.clone() }
+                        },
+                        //update status column. optional mods dont strictly need updating - its non-breaking as they're client side only
+                        match config.pending_updates.iter().any(|pu|{
+                        servers.iter().find(|x| x.0==*k).unwrap().1.mods.contains(pu)
+                        }){
+                            false => {
+                                "".to_string()
+                            },
+                            true => {
+                                update_required_msg.clone()
+                            }
+                        }
+                        
+                        ]
                     )
                 })
                 .collect::<Vec<Row>>(),
-            [Constraint::Length(self.status.iter().fold(13, |acc,x| std::cmp::max(acc,x.0.len())) as u16),Constraint::Fill(1)]
+            [Constraint::Length(self.status.iter().fold(13, |acc,x| std::cmp::max(acc,x.0.len())) as u16),Constraint::Length(offline_msg.len() as u16),Constraint::Fill(1)]
         ).row_highlight_style(Style::default().fg(Color::Black).bg(Color::Rgb(66, 149, 0xff))).header(Row::new(["(launch: \u{2191}/\u{2193})"]).style(Style::new().fg(Color::LightYellow).bold()));
-        ret
+        Ok(ret)
     }
 
     /// returns false if should quit i.e. if launched arma 
-    fn key_handler(&mut self, key: KeyEvent) -> bool {
+    async fn key_handler(&mut self,ui: &mut TUI, key: KeyEvent) -> Result<bool,Error> {
         if key.code == KeyCode::Up{
             self.select.select_previous();
         }else if key.code == KeyCode::Down {
             self.select.select_next();
         }else if key.code == KeyCode::Enter {
-            self.servers.get(self.select.selected().unwrap()).unwrap().1.launch();
-            return false;
+
+            let s = self.servers.get(self.select.selected().unwrap()).unwrap();
+            //pending updates
+            let config = CACConfig::read().unwrap();
+            let servers = servers::read_config().unwrap();
+            let update_list = config.pending_updates.iter().filter_map(|pu| {
+                match servers.iter().find(|x| x.0==s.0).unwrap().1.mods.contains(pu) {
+                    false => None,
+                    true => Some(pu.clone())
+                }
+            }).collect::<Vec<_>>();
+            let mut launch: bool = true;
+            if update_list.len()>0 {
+                launch = ui.popup_download(update_list).await?;
+                    
+            }
+            if launch {
+                s.1.launch();
+                return Ok(false);
+            }
         }
-        true
+        Ok(true)
     }
 }
 
 struct UpdateModsMenu {
-
+    submenu: TableState
 }
 
 impl UpdateModsMenu {
@@ -169,6 +210,16 @@ impl UpdateModsMenu {
 
         ];
     }
+
+    fn key_handler(&mut self,key: KeyEvent) -> () {
+        if key.code == KeyCode::Up{
+            self.submenu.select_previous();
+        }else if key.code == KeyCode::Down {
+            self.submenu.select_next();
+        }else if key.code == KeyCode::Enter {
+
+        }
+    }
 }
 
 struct OptionalModsMenu {
@@ -177,9 +228,9 @@ struct OptionalModsMenu {
 }
 
 enum OptionalModsStatus {
-    enabled,
-    disabled,
-    not_found
+    enabled = 1,
+    disabled = 2,
+    not_found = 3,
 }
 
 impl Display for OptionalModsStatus {
@@ -218,6 +269,8 @@ impl OptionalModsMenu {
             } Ok(())
         }).collect::<Result<_,Error>>()?; //collect and propogate error if file_exists fails
         
+        self.titles.sort_by(|x,y| x.0.cmp(&y.0));
+
         Ok(Table::new(self.titles.iter().map(|x| Row::new(vec![x.0.clone(),x.1.to_string()])),
         [Constraint::Length(self.titles.iter().fold(13, |acc,x| std::cmp::max(acc,x.0.len())) as u16),Constraint::Fill(1)]
 
@@ -239,18 +292,8 @@ impl OptionalModsMenu {
             let mut config = CACConfig::read()?;
             match entry.1{
                 OptionalModsStatus::not_found => {
-
-                    //TODO one point of reference?
-                    let content = CACContent::read()?;
-                    let content_map =  content.content_map();
-                    let links  =content_map.get(&entry.0).unwrap();
                     
-                    let join = ui.popup_download((*links).clone()).await;
-                    //TODO check indicates download fail
-
-                    if join.is_ok() { //if download mod
-
-                    }
+                    let join = ui.popup_download(vec![entry.0.clone()]).await;
 
                     match join {
                         Ok(b) => {
@@ -279,8 +322,7 @@ impl OptionalModsMenu {
                 }
 
             }
-            let f = OpenOptions::new().write(true).truncate(true).open(CONFIG_FILE.as_path())?;
-            serde_json::to_writer_pretty(f, &config);
+            config.save();
         }
         Ok(())
     }
@@ -291,7 +333,15 @@ struct LauncherSettingsMenu {
 }
 
 impl LauncherSettingsMenu {
-    
+    fn make() -> Result<(),Error>{
+        let config = CACConfig::read()?;
+        let titles = vec![
+            "Change Username".into(),
+            format!("Change Exile Password [{}]",config.server_password),
+            "Change Mods Directory".into(),
+        ];
+        Err(anyhow!("not impl"))
+    }
 }
 
 pub struct TUI {
@@ -310,19 +360,33 @@ impl TUI {
     }
 
     pub fn popup_message(&mut self, message: &str) {
-        let block = Block::bordered();
+        let block =  Block::bordered().green();
+
         let lines: Vec<_> = message.split('\n').collect();
-        let text  = Text::from(lines.iter().map(|x| x.to_line()).collect::<Vec<_>>());
+        let text  = Text::from(lines.iter().map(|x| x.to_line().green()).collect::<Vec<_>>());
         let panel = Paragraph::new(text).block(block).centered();
         self.term.clear();
-
+        let sz = self.term.size().unwrap();
         self.term.draw(|x| {
             let rect = center(
                 x.area(),
-                Constraint::Length(
-                    max((message.len() + 2) as u16, max(50, (panel.line_width() + 2) as u16))
-                ),
+                Constraint::Length((panel.line_width() + 2) as u16),
                 Constraint::Length(lines.len() as u16 + 2) //TODO line wraps
+            );
+            panel.clone().render(rect, x.buffer_mut());
+        });
+    }
+
+    pub fn exit_logo(&mut self) {
+        let lines: Vec<_> = LOGO.split('\n').collect();
+        let text  = Text::from(lines.iter().map(|x| x.to_line().green()).collect::<Vec<_>>());
+        let panel = Paragraph::new(text).centered();
+        self.term.clear();
+        self.term.draw(|x| {
+            let rect = center(
+                x.area(),
+                Constraint::Fill(1),
+                Constraint::Length(lines.len() as u16 + 2)
             );
             panel.clone().render(rect, x.buffer_mut());
         });
@@ -407,6 +471,7 @@ impl TUI {
     pub fn popup_progress(
         &mut self,
         pbuf: Arc<Mutex<RefCell<String>>>,
+        title_buf: Arc<Mutex<String>>,
         finish: CancellationToken
     ) -> bool {
         let mut prev_len = 0;
@@ -417,12 +482,14 @@ impl TUI {
         
             let panel: Paragraph;
             let v: String;
+            let t: String;
             {
                 let lock = pbuf.lock().unwrap();
                 v = lock.borrow().clone();
             }
             let block = Block::bordered()
                 .title_bottom("Press C to cancel")
+                .title_top(title_buf.lock().unwrap().clone())
                 .title_alignment(Alignment::Center);
             if v.len() == 0 {
                 log::info!("detected ProgressBarBuffer len==0 (bug to fix)"); //TODO why is this happening...
@@ -460,53 +527,35 @@ impl TUI {
         self.term.clear();
     }
 
-    /// popup to wrap download + unzip mod
+    /// popup to wrap download + unzip mod. will remove items from CACConfig->pending_updates after completing update.
     /// # Return:
-    /// indicates download failed by returning Error
-    pub async fn popup_download(&mut self, links: Links) -> Result<bool,Error> {
+    /// Returns false if operation cancelled by user.
+    pub async fn popup_download(&mut self, items: Vec<String>) -> Result<bool,Error> {
         warn!("UI: entered popup_download");
 
         let term_size = self.term.size()?;
         let mut progressBuf = ProgressBarBuffer::new(); 
         let mut pbuf = progressBuf.buffer.clone();
-        let mut progress = ProgressBar::new((term_size.width /2) as u64).with_style(ProgressStyle::with_template("{spinner} {msg:.green.bold}")?);
+        let mut progress = ProgressBar::new((term_size.width /2) as u64).with_style(ProgressStyle::with_template(PROGRESS_STYLE_MESSAGE)?);
         progress.set_length(1); progress.set_position(0);
         progress.set_draw_target(ProgressDrawTarget::term_like(Box::new(progressBuf)));
+
+        let title_buf = Arc::new(Mutex::new(format!("0/{}",items.len())));
+        let _title_buf = title_buf.clone();
         
         let _finish = CancellationToken::new();
         let finish = _finish.clone();
 
-        let join: JoinHandle<Result<(),Error>>  =tokio::spawn(async move {
+        let join: JoinHandle<Result<(),Error>>  =tokio::spawn(download_items(items, progress, title_buf, finish));
 
-            progress.set_message(" Fetching info... ");
-
-            let config = CACConfig::read()?;
-            let client_ctx = ClientCtx::build()?; //TODO initialise elsewhere
-            let token = msgraph::login(&client_ctx.client).await?;
-
-            let mut archive0: Option<PathBuf> = None;
-            for link in links.into_iter() {
-                warn!("popup_download: downloading item: {}",link);
-                let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(),link.to_string() ).await?;
-                let file = msgraph::download_item(client_ctx.client.clone(), token.clone(),item, TMP_FOLDER.to_str().unwrap().to_string(), &mut progress, finish.clone()).await?;
-                if(archive0.is_none()){
-                    archive0 = Some(file);
-                }
-            }
-            unzip(archive0.unwrap().to_str().unwrap(),config.absolute_mod_dir()?.to_str().unwrap(),Some(&mut progress))?;
-            finish.cancel();
-            warn!("popup_download: async move finished ok");
-            Ok(())
-        });
-
-        let ret = if !self.popup_progress(pbuf, _finish.clone()){
+        let ret = if !self.popup_progress(pbuf, _title_buf,_finish.clone()){
             _finish.cancel();
             false
         }else {
             true
         };
 
-        join.await?;
+        join.await??; //this error almost got away... JoinError then download error
         warn!("UI:popup_download ok");
         self.term.clear();
         Ok(ret)
@@ -587,7 +636,8 @@ impl TUI {
     }
 
     pub async fn run(&mut self) -> Result<(), Error> {
-        let servers = servers::read_config()?;
+        let mut servers = servers::read_config()?;
+        servers.sort_by(|x,y| {x.0.cmp(&y.0)});
 
         let titles: Vec<_> = vec![
             "Connect",
@@ -627,7 +677,7 @@ impl TUI {
                 //render tab menus 
                 match titles[tab_select] {
                     "Connect" => {
-                        x.render_stateful_widget(server_menu.make(), Rect::new(0,3,term_size.width,term_size.height.saturating_sub(3)), &mut server_menu.select);
+                        x.render_stateful_widget(server_menu.make().unwrap(), Rect::new(0,3,term_size.width,term_size.height.saturating_sub(3)), &mut server_menu.select);
                     }
                     "Update Mods" => {
                         
@@ -656,7 +706,7 @@ impl TUI {
 
                 match titles[tab_select] {
                     "Connect" => {
-                        if !server_menu.key_handler(key) {return Ok(());}
+                        if !server_menu.key_handler(self,key).await? {return Ok(());}
                     }
                     "Update Mods" => {
 
@@ -665,11 +715,6 @@ impl TUI {
                         optional_mods_menu.key_handler(self,key).await;
                     }
                     "Change User Profile" => {
-                        if key.code == KeyCode::Up {
-
-                        }else if key.code == KeyCode::Down {
-
-                        }
                     }
                     "Launcher Settings" => {
                         if key.code == KeyCode::Up {

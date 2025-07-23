@@ -1,10 +1,10 @@
-use std::{collections::HashMap, path::{self, PathBuf}, time::Duration};
+use std::{collections::HashMap, fs::DirEntry, path::{self, PathBuf}, time::Duration};
 
-use anyhow::{anyhow, Error };
+use anyhow::{anyhow};
 use serde::Deserialize;
 use a2s::{A2SClient,info::Info};
 use tokio::task::JoinHandle;
-use crate::{configs::CACConfig, *};
+use crate::{configs::{Config, *}, *};
 
 #[derive(Deserialize,Debug)]
 pub struct Server {
@@ -23,10 +23,7 @@ const LAUNCH_ARGS: Lazy<Vec<String>> = Lazy::new(|| {
 
 impl Server {
     pub fn launch(&self) -> Result<(),Error> {
-        let mut config_buf = String::new();
-        let mut config_file = File::open(CONFIG_FILE.as_path())?;
-        config_file.read_to_string(&mut config_buf)?;
-        let mut config: CACConfig = serde_json::from_str::<CACConfig>(&config_buf)?;
+        let config = CACConfig::read()?;
         let mod_dir = config.absolute_mod_dir()?;
         let mut args = LAUNCH_ARGS.clone();
         args.push(format!("-connect={}",self.address));
@@ -59,7 +56,7 @@ impl Server {
 }
 
 pub fn read_config() -> Result<Vec<(String,Server)>, Error> {
-    let conf_path = CONFIG_FOLDER.join("servers.json");
+    let conf_path = SERVERS_FILE.to_path_buf();
     if !std::fs::exists(&conf_path)? {
         return Err(anyhow!("servers.json config file not found"));
     }
@@ -92,3 +89,58 @@ pub async fn status(servers: &Vec<(String,Server)>) -> Result<Vec<(String,Option
     }
     Ok(ret)
 } 
+
+
+pub fn update_list() -> Result<Vec<(String,Vec<String>)>,Error> {
+    let config = CACConfig::read()?;
+
+    let moddir = std::fs::read_dir(config.absolute_mod_dir()?)?;
+    let arma_pb = PathBuf::from_str(&config.arma_path)?;
+    let arma_dir_pb = arma_pb.parent().unwrap().to_str().unwrap();
+    
+    let arma_dir = std::fs::read_dir(arma_dir_pb)?;
+
+    warn!("arma dir {}",arma_dir_pb);
+
+    let cme = |e| {
+             warn!("error iterating mod directory: {}",e); None
+    };
+    let dir_filter = |x: Result<DirEntry, std::io::Error>|{
+        x.map_or_else(cme,|x|{
+            x.file_type().map_or_else(cme, |t| {
+                match t.is_dir() {
+                    true => {Some(x.file_name().into_string().unwrap())}
+                    false => { None }
+                }
+            })
+        })
+    };
+    let arma_folders: Vec<_> = arma_dir.filter_map(dir_filter).collect(); //for dlc, 
+    let mods_present: Vec<_> = moddir.filter_map(dir_filter).collect();
+
+    let servers = read_config()?;
+    let ret: Vec<(String,Vec<String>)> = servers.iter().map(|(name,server)| {
+        let update_list = server.mods.iter().filter_map(|x| {
+
+            //assuming 'mods' without @ to be dlc
+            match if x.starts_with("@") {mods_present.contains(x)} else {arma_folders.contains(x)} {
+                true => {None}
+                false => {
+                    Some(x.clone())
+                }
+            }
+        }).chain(
+            server.mods.iter().filter_map(|x|{
+                match config.pending_updates.contains(x) {
+                    true => {
+                        Some(x.clone())
+                    }
+                    false => {None}
+                }
+            })
+        ).collect::<Vec<_>>();
+        (name.clone(),update_list)
+    }).collect();
+    Ok(ret)
+    
+}

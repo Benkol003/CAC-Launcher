@@ -16,6 +16,7 @@ pub mod dirhash;
 pub mod UI;
 pub mod servers;
 pub mod configs;
+pub mod download;
 
 use std::{default, env, fmt::Debug, fs::{remove_file, File}, io::{BufRead, BufReader, Read, Write}, path::{Path, PathBuf}, process::{Command, Stdio}, str::FromStr, sync::{Arc, Mutex}, time::{Duration, SystemTime}, usize};
 use anyhow::{anyhow,Error};
@@ -36,25 +37,11 @@ use jwalk::WalkDir;
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
 pub const PROGRESS_STYLE_DOWNLOAD: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
 pub const PROGRESS_STYLE_EXTRACT: &str = "{spinner} Extracting: {percent}% Elapsed: {elapsed}, ETA: {eta} {msg:.green.bold}";
-
-pub const CONFIG_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
-    PathBuf::from("CAC-Config")
-});
-pub const TMP_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
-    CONFIG_FOLDER.join("tmp")
-});
-pub const SERVERS_FILE: Lazy<PathBuf> = Lazy::new(|| {
-    CONFIG_FOLDER.join("servers.json")
-});
-pub const CONFIG_FILE: Lazy<PathBuf> = Lazy::new(|| {
-    CONFIG_FOLDER.join("config.json")
-});
-
-pub const CONTENT_FILE: Lazy<PathBuf> = Lazy::new(|| {
-    CONFIG_FOLDER.join("content.json")
-});
+pub const PROGRESS_STYLE_MESSAGE: &str = "{spinner} {msg:.green.bold}";
 
 pub static Z7_EXE: &[u8] = include_bytes!("7za.exe");
+
+//you will need to set timeout for get requests. timeout set for the client only works for reads
 pub const TIMEOUT: Duration = Duration::from_secs(5);
 
 pub struct FileAutoDeleter(PathBuf);
@@ -110,7 +97,7 @@ pub async fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<Do
 
     //resolve tinyurl to underlying sharepoint url and to get session cookies
     let mut clock = Stopwatch::start_new();
-    let response = ctx.client.get(url.clone()).send().await?;
+    let response = ctx.client.get(url.clone()).timeout(TIMEOUT).send().await?;
     clock.stop();
     println!("v1 time: {}ms",clock.elapsed_ms());
     let once_url = response.url().as_str();
@@ -125,7 +112,7 @@ pub async fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<Do
     }
 
     //redirect to download 
-    let response = ctx.client.head(download_url.clone()).send().await?;
+    let response = ctx.client.head(download_url.clone()).timeout(TIMEOUT).send().await?;
     if !response.status().is_success(){
         return Err(anyhow!("failed to fetch url {} - HTTP error {}: {}",&download_url,response.status().as_str(),response.text().await?));
     }
@@ -164,6 +151,10 @@ impl ClientCtx {
             .default_headers(headers)
             .redirect(Policy::limited(10))
             .use_native_tls()
+            .timeout(TIMEOUT)
+            .read_timeout(TIMEOUT)
+            .connect_timeout(TIMEOUT)
+            .pool_idle_timeout(TIMEOUT)
             .build()?,
             jar: jar
         };

@@ -9,7 +9,6 @@ use std::io::{Read, Write};
 use std::{
     fs::{self, File},
     hash::Hasher,
-    os::windows::fs::MetadataExt,
     path::Path,
     sync::Mutex,
 };
@@ -89,7 +88,7 @@ pub fn hash_directory(base_path: &Path) -> Result<u128, Error> {
             if ftype.is_file() {
 
                 //TODO RM
-                let fsize = Size::from_bytes(entry.metadata()?.file_size());
+                let fsize = Size::from_bytes(entry.metadata()?.len());
                 println!("{}, size: {}",path.as_os_str().to_str().unwrap(),fsize.format()); 
 
                 hasher.write_u8(0);

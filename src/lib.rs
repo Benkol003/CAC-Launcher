@@ -275,17 +275,17 @@ pub fn unzip(fname: &str,dest: &str, mut o_progress: Option<&mut ProgressBar>) -
 
 pub fn launch_steam() -> Result<(),Error> {
     use sysinfo::ProcessRefreshKind;
-    use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
-
+    
     let steam: PathBuf;
     #[cfg(windows)]
     {
+        use winreg::{enums::HKEY_LOCAL_MACHINE, RegKey};
         let hklm= RegKey::predef(HKEY_LOCAL_MACHINE);
         let steam_hkey: String = hklm.open_subkey("SOFTWARE\\WOW6432Node\\Valve\\Steam").map_err(|_| anyhow!("steam not installed"))?.get_value("InstallPath")?;
         steam = PathBuf::from(steam_hkey).join("steam.exe");
     }
 
-    #[cfg(linux)]
+    #[cfg(unix)]
     {
         steam = "steam.exe".into();
     }

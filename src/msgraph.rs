@@ -214,7 +214,8 @@ pub async fn login(client: &Client) -> Result<String, Error> {
     let mut params = HashMap::new();
     params.insert("client_id", APP_CLIENT_ID);
     params.insert("scope", "https://graph.microsoft.com/.default");
-    params.insert("client_secret", secrets::MSGRAPH_KEY);
+    let key = secrets::msgraph_key()?;
+    params.insert("client_secret", key.as_str());
     params.insert("grant_type", "client_credentials");
 
     let response = client

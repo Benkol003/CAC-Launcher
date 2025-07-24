@@ -19,5 +19,9 @@ jobs:
         submodules: recursive
     - name: Build
       run: cargo build --verbose
+      env:
+        MSGRAPH_KEY: ${{ secrets.MSGRAPH_KEY }}
     - name: Run tests
       run: cargo test --verbose
+      env:
+        MSGRAPH_KEY: ${{ secrets.MSGRAPH_KEY }}

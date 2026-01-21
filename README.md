@@ -2,7 +2,7 @@
     <img src="https://raw.githubusercontent.com/Benkol003/CAC-GUI/master/public/cac_logo_transparent.gif" alt="CAC logo" >
 </p>
 <p align="center">
-    <a href="https://discord.gg/5e8crrDd">
+    <a href="https://discord.gg/dNGcyEYK8F">
         <img src="https://img.shields.io/badge/Discord-Join-darkviolet.svg?style=flat-square" alt="ACE3 Discord">
     </a>
 </p>

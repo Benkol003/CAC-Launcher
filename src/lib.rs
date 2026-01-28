@@ -33,6 +33,17 @@ use tokio_util::sync::CancellationToken;
 
 use jwalk::WalkDir;
 
+pub const LOGO: &str =
+r###"
+  _____          _____ _                            _               
+ / ____|   /\   / ____| |                          | |              
+| |       /  \ | |    | |     __ _ _   _ _ __   ___| |__   ___ _ __ 
+| |      / /\ \| |    | |    / _` | | | | '_ \ / __| '_ \ / _ \ '__|
+| |____ / ____ \ |____| |___| (_| | |_| | | | | (__| | | |  __/ |   
+ \_____/_/    \_\_____|______\__,_|\__,_|_| |_|\___|_| |_|\___|_|   
+    Made by UnladenCoconut 
+"###;
+
 //app will be blocked without this. reccommend using a browser user agent string to prevent rate limiting.
 const USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:135.0) Gecko/20100101 Firefox/135.0";
 pub const PROGRESS_STYLE_DOWNLOAD: &str = "{spinner} {msg:.green.bold} {percent}% {decimal_bytes}/{decimal_total_bytes} [{decimal_bytes_per_sec}], Elapsed: {elapsed}, ETA: {eta}";
@@ -78,15 +89,13 @@ pub struct DownloadInfo {
         pub etag: String,
 }
 
-//download until finished or canceelled. If file exists at path then resumes a partial download.
-//assume client is in a state that it has the neccesary cookies to use the download url
-pub async fn download_file(info: DownloadInfo,path: &Path,canceller: CancellationToken) -> Result<(),Error> {
-    let do_partial = Path::exists(path);
-
-    return Ok(());
+pub async fn final_url(client: Client, url: Url) -> Result<Url, Error> {
+    let response = client.get(url).timeout(TIMEOUT).send().await?;
+    Ok(response.url().clone())
 }
 
 //using reqwest
+#[deprecated(note="this was previously used to download sharepoint items without a msgraph item. not reccommended as can be rate limited, use download_items() instead")]
 pub async fn get_download_info(ctx: &ClientCtx,url: Url,dir: &Path) -> Result<DownloadInfo,Error> {
 
     //make sure to clear out FedAuth cookie so it doesnt break stuff
@@ -190,8 +199,8 @@ pub fn unzip(fname: &str,dest: &str, mut o_progress: Option<&mut ProgressBar>) -
     match o_progress {
         None => {},
         Some(ref progress) => {
-            progress.set_style(ProgressStyle::with_template(PROGRESS_STYLE_DOWNLOAD)?);
-            progress.set_message("Unzipping...");
+            progress.set_style(ProgressStyle::with_template(PROGRESS_STYLE_EXTRACT)?);
+            progress.set_message("...");
             progress.set_length(100);
             progress.set_position(0);
         }
@@ -254,7 +263,7 @@ pub fn unzip(fname: &str,dest: &str, mut o_progress: Option<&mut ProgressBar>) -
             }
         }
         match o_progress{None =>{},Some(ref progress) =>{
-                progress.finish_and_clear();
+            progress.reset(); //TODO should be calling finish_and_clear() and then creating a new progress bar - make a custom progress indicator
         }
         }
     

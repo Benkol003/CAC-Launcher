@@ -1,6 +1,8 @@
 use std::{collections::{HashMap, HashSet}, fs::{File, OpenOptions}, io::Read, path::{self, PathBuf}};
 use crate::{UI::TUI};
 use anyhow::{anyhow,Error};
+use chrono::format::StrftimeItems;
+use log::warn;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 
@@ -22,6 +24,12 @@ pub const CONTENT_FILE: Lazy<PathBuf> = Lazy::new(|| {
     CONFIG_FOLDER.join("content.json")
 });
 
+/// associated ID's for downloaded temp files.
+/// 7zip needs parts to be named @name.7z.00x
+pub const TMP_DOWNLOADS_FILE: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("tmp-downloads.json")
+});
+
 pub trait Config: Serialize + for<'de> Deserialize<'de> {
     fn file_path() -> PathBuf;
     fn save(&self) -> Result<(),Error> {
@@ -32,7 +40,7 @@ pub trait Config: Serialize + for<'de> Deserialize<'de> {
 
     fn _read(path: PathBuf) -> Result<Self,Error> {
         let mut config_buf = String::new();
-        let mut config_file = File::open(Self::file_path())?;
+        let mut config_file = File::open(path)?;
         config_file.read_to_string(&mut config_buf)?;
         Ok(serde_json::from_str::<Self>(config_buf.as_str())?)
     }
@@ -40,7 +48,26 @@ pub trait Config: Serialize + for<'de> Deserialize<'de> {
     fn read() -> Result<Self,Error> {
         Self::_read(Self::file_path())
     }
+} //TODO save on drop - set a unsaved bool for changes (either wrap all mut fn's or just flag if get mut ref), panic in drop
+
+#[derive(Eq, PartialEq, Serialize, Deserialize, Debug, Clone)]
+pub struct TmpDownloadID {
+    pub id: String,
+    pub etag: String
 }
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CACDownloadManifest(pub HashMap<String,TmpDownloadID>);
+
+
+impl Config for CACDownloadManifest {
+    fn file_path() -> PathBuf {
+         TMP_DOWNLOADS_FILE.to_path_buf()
+    }
+}
+
+//TODO: remove mods from pending updates if they dont exist in content.json anymore (if client missed update and then it was removed from the server)
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -107,9 +134,23 @@ impl CACConfig {
             //TODO enter folder instead not path to exe
             Err(_) => {
                 loop {
-                    ap=ui.popup_text_entry("Enter path to your 'arma3_x64.exe'"); //TODO: trim quotes
+                    ap=ui.popup_text_entry("Enter path to your arma folder or 'arma3_x64.exe'").ok_or(anyhow!("path to arma 3 executable not provided"))?
+                    .replace("\"", ""); //trim double quotes if using 'copy from path' option in windows
                     match std::fs::metadata(&ap) {
                         Ok(md) => {
+                            warn!("arma 3 ap: {}",ap.as_str());
+                            if(md.is_dir()){
+                                warn!("arma 3 ap is dir");
+                                let ap_bin_pb = PathBuf::from(&ap).join("arma3_x64.exe");
+                                let ap_bin_md = std::fs::metadata(&ap_bin_pb)?;
+                                if(!ap_bin_md.is_file()){
+                                     ui.popup_blocking_prompt(format!("'{}' is not a file, try again.",&ap_bin_pb.display()).into());
+                                     continue;
+                                }
+                                let ap_bin = ap_bin_pb.as_os_str().to_str().ok_or(anyhow!("failed to convert PathBuf to str"))?;
+                                ap = ap_bin.to_string();
+                                break;
+                            }
                             if(!md.is_file()){
                                 ui.popup_blocking_prompt(format!("'{}' is not a file, try again.",ap).into());
                                 continue;

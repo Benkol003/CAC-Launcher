@@ -12,8 +12,12 @@ default-run = "main"
 "name" = "downloader"
 "path" = "src/downloader.rs"
 
+[[bin]]
+"name" = "test-main"
+"path" = "src/test-main.rs"
+
 [dependencies]
-a2s = { path = "a2s-rs", features = ["async"]}
+a2s = { version = "0.6.1", features = ["async"]}
 anyhow = { version = "1.0.98", features = ["backtrace"] }
 base64 = "0.22.1"
 blake3 = "1.8.2"
@@ -38,6 +42,7 @@ simplelog = "0.12.2"
 size = "0.5.0"
 stopwatch = "0.0.7"
 sysinfo = "0.35.2"
+thiserror = "2.0.17"
 tokio = { version = "1.45.0", features = ["macros", "rt", "rt-multi-thread", "signal", "sync"] }
 tokio-util = "0.7.14"
 urlencoding = "2.1.3"

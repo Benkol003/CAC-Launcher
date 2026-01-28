@@ -7,12 +7,14 @@
 
 use std::{fs::{self, File, OpenOptions}, io::Write, panic::PanicHookInfo, time::Duration};
 use anyhow::{anyhow,Error};
+use log::{log, warn};
 use ratatui::{style::Stylize, text::Line};
 use regex::Regex;
 use reqwest::{header::CONTENT_DISPOSITION};
 use simplelog::{WriteLogger};
-use src_backend::{configs::{Config, *},UI::{self, LOGO, TUI}, *};
+use src_backend::{configs::{Config, *},UI::{self, TUI}, *};
 use tokio::time::{sleep, Sleep};
+use clap::Parser;
 
 static CONFIG_URL: &str = "https://github.com/Benkol003/CAC-Config/archive/master.zip";
 
@@ -20,6 +22,12 @@ static CONFIG_URL: &str = "https://github.com/Benkol003/CAC-Config/archive/maste
 /// downloads the latest config, checks for new or updated mod links, and adds pending updates to the app config.
 /// if no config files exist locally then will create them from defaults.
 async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
+
+    if !TMP_DOWNLOADS_FILE.as_path().is_file() {
+        let tmp_manifest = CACDownloadManifest::default();
+        tmp_manifest.save()?;
+    }
+    //TODO clean out tmp folder
 
     tui.popup_message("fetching latest configuration...");
 
@@ -100,10 +108,19 @@ fn panic_handler(info: &PanicHookInfo) {
     std::process::exit(-1);
 }
 
+#[derive(Parser,Debug)]
+#[command(version, about)]
+struct Args{
+    #[arg(long,default_value_t = false, help="don't update the local CAC-Config manifest with a downloaded latest version")]
+    no_update: bool
+}
+
+const LOG_PATH: &'static str = "CAC-Config/CAC-Launcher.log";
+
 #[tokio::main]
 async fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
-    WriteLogger::init(simplelog::LevelFilter::Warn, simplelog::Config::default(), File::create("CAC-Launcher.log").unwrap()).unwrap();
+    WriteLogger::init(simplelog::LevelFilter::Warn, simplelog::Config::default(), File::create(LOG_PATH).unwrap()).unwrap();
     let mut tui = TUI::new();
 
     std::panic::set_hook(Box::new(panic_handler));
@@ -114,7 +131,7 @@ async fn main() {
         let bt = e.backtrace();
         log::error!("Error in main: {}", e);
         log::error!("{bt}\n");
-        let el = vec![Line::from(vec!["fatal error: ".light_red(),format!("{}",e).into()]),"backtrace has been added to CAC-Launcher.log".light_yellow().into()];
+        let el = vec![Line::from(vec!["fatal error: ".light_red(),format!("{}",e).into()]),format!("backtrace has been added to {} ",LOG_PATH).light_yellow().into()];
         tui.popup_blocking_prompt(el.into());
         drop(tui);
         std::process::exit(-1);
@@ -123,21 +140,22 @@ async fn main() {
 }
 
 async fn fake_main(tui: &mut TUI) -> Result<(), Error> {
+
+    let args = Args::parse();
+
     force_create_dir(&CONFIG_FOLDER)?;
     force_create_dir(&CONFIG_FOLDER.join("tmp"))?;
 
-    if !std::fs::exists(CONTENT_FILE.as_path())? {
-        tui.warn_unknown_mod_state();
-    }
-
+    //unpack 7z to use for the rest of the program.
     let _z7 = FileAutoDeleter::new("7za.exe"); //allows file to be deleted automatically even if theres an error
     { //scope so file is closed before running process
         let mut z7 = File::create("7za.exe")?;
         z7.write_all(Z7_EXE).map_err(|_| anyhow!("failed to unpack 7za.exe"))?;
     }
-
-    //also tests if any of the config files are broken. If it is, not my problem to fix that
-    update_cac_config(tui).await?; //TODO check if mods list was updated and if so, what.
+    
+    if !args.no_update {
+        update_cac_config(tui).await?;
+    } 
 
     tui.run().await?;
     tui.exit_logo();

@@ -30,26 +30,27 @@ impl Server {
         args.push(format!("-port={}",self.port));
         args.push(format!(r#"-name="{}""#,config.username));
 
-        let mut mod_arg: String = r#""-mod="#.into();
+        let mut mod_arg: String = r#"-mod="#.into();
         let opt_mod_iter: Box<dyn Iterator<Item = &String>> = if config.optionals_on {
             Box::new(std::iter::empty::<&String>().into_iter())
         }else {
             Box::new(config.enabled_optionals.iter())
         };
-        self.mods.iter().chain(config.enabled_optionals.iter()).chain(opt_mod_iter).for_each(|x|{ 
+        self.mods.iter().chain(config.enabled_optionals.iter()).chain(opt_mod_iter).for_each(|x|{
+            mod_arg+="\""; 
             if(x.chars().nth(0).unwrap()=='@'){
                 mod_arg+=mod_dir.join(x).as_os_str().to_str().unwrap();
             }else{ //is dlc
                 mod_arg+=x; 
             }
-            mod_arg+=";";
+            mod_arg+="\";";
         });
-        mod_arg+=r#"""#;
         args.push(mod_arg);
         if self.password {
-            args.push(format!(r#"-password="{}"#,config.server_password));
+            args.push(format!(r#"-password="{}""#,config.server_password));
         }
-        log::warn!("launching arma 3 with args: '{}'",args.iter().fold(String::new(),|i,x|{i+" "+x})); //TODO RM 
+        let args_expanded  =args.iter().fold(String::new(),|i,x|{i+" "+x});
+        log::warn!("launching arma 3 with args (len {}): '{}'",args_expanded.len(),args_expanded); //TODO RM 
         std::process::Command::new(config.arma_path).args(args).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).spawn()?;
         Ok(())
     }

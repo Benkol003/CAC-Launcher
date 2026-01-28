@@ -38,8 +38,12 @@ check config updates work
 remaining menus
 app should self update if there is a github release (WIX toolset)
 finish exit logo
+check if arma is running otherwise updates cant access files
 
 ### others
+
+handle launching/restarting servers, automatic mod updates between server restarts? but all servers need to be offline to unlock mod files if servers share a mod
+
 annotate better errors by converting to anyhow! messages
 set client timeout? 
 - colorise optional mods error popup

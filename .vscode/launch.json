@@ -6,9 +6,9 @@
             "type": "lldb",
             "request": "launch",
             "program": "${workspaceRoot}/target/debug/main.exe",
-            "args": [],
+            "args": ["--no-update"],
             "cwd": "${workspaceRoot}/",
-            "preLaunchTask": "rust: cargo build"
+            "preLaunchTask": "rust: cargo build",
         },
 
                 {

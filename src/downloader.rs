@@ -4,6 +4,7 @@ use clap::Parser;
 use colored::Colorize;
 
 use indicatif::{ProgressBar, ProgressStyle};
+use reqwest::Url;
 use src_backend::{msgraph::SharedDriveItem, *};
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -77,7 +78,8 @@ async fn main() -> Result<(),Error> {
     //grab info first and group partial archives
     println!("Fetching link info...");
     let mut tasks = JoinSet::new(); 
-    urls.iter().for_each(|u| {tasks.spawn(msgraph::get_shared_drive_item(ctx.client.clone(), token.clone(), u.clone()));});
+    urls.iter().map(|u| Url::parse(u).map_err(|e| anyhow!(e))).collect::<Result<Vec<Url>,Error>>()?
+    .iter().for_each(|u| {tasks.spawn(msgraph::get_shared_drive_item(ctx.client.clone(), token.clone(),u.clone()));});
     let drive_items: Vec<SharedDriveItem>   = tasks.join_all().await.into_iter().collect::<Result<_,_>>()?;
     let items = group_drive_item_archives(drive_items)?;
 
@@ -92,13 +94,20 @@ async fn main() -> Result<(),Error> {
     println!("Downloading {} files...",urls.len());
 
     //TODO 
-    // limit number of running downloads. unzip can be parralel, but all previous downloads for a split archive need to be downloaded first
+    // limit number of running downloads. unzip can be parallel, but all previous downloads for a split archive need to be downloaded first
     for item in &items {
         let mut parts: Vec<PathBuf> = Vec::new();
         for part in &item.1 {
             let mut progress = ProgressBar::new(0).with_style(ProgressStyle::with_template(PROGRESS_STYLE_DOWNLOAD)?);//TODO static assert usize::MAX<= u64::MAX
             let p =msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone(),&mut progress, shutdown.clone()).await?;
-            parts.push(p);
+            let part = match p {
+                Some(p) => p,
+                None => {
+                    println!("{}",format!("Download cancelled.").bold().bright_yellow());
+                    return Ok(());
+                }
+            };
+            parts.push(part);
         }
 
         //7zip will automatically find and extract the remaining parts

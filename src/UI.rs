@@ -28,18 +28,7 @@ use tokio_util::sync::CancellationToken;
 
 use std::cell::{ Cell, RefCell };
 
-use crate::{configs::{CACConfig, CACContent, Config, Links, TMP_FOLDER}, download::download_items, msgraph, servers::{ self, Server }, unzip, ClientCtx, PROGRESS_STYLE_DOWNLOAD, PROGRESS_STYLE_MESSAGE};
-
-pub const LOGO: &str =
-r###"
-  _____          _____ _                            _               
- / ____|   /\   / ____| |                          | |              
-| |       /  \ | |    | |     __ _ _   _ _ __   ___| |__   ___ _ __ 
-| |      / /\ \| |    | |    / _` | | | | '_ \ / __| '_ \ / _ \ '__|
-| |____ / ____ \ |____| |___| (_| | |_| | | | | (__| | | |  __/ |   
- \_____/_/    \_\_____|______\__,_|\__,_|_| |_|\___|_| |_|\___|_|   
-    Made by UnladenCoconut 
-"###;
+use crate::{ClientCtx, LOGO, PROGRESS_STYLE_DOWNLOAD, PROGRESS_STYLE_MESSAGE, configs::{CACConfig, CACContent, Config, Links, TMP_FOLDER}, download::download_items, msgraph, servers::{ self, Server }, unzip};
 
 fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
     let [area] = Layout::horizontal([horizontal]).flex(Flex::Center).areas(area);
@@ -114,6 +103,22 @@ impl TermLike for ProgressBarBuffer {
     }
 }
 
+struct UpdateMenu {
+    select: TableState,
+    update_servers: Vec<(String,Server)>,
+    update_items: Vec<(String,String)>
+}
+
+// impl UpdateMenu {
+//     fn Make<'a>(&mut self) -> Result<Table<'a>,Error>{
+        
+//         let ret = Table::new(
+//             Row::new()
+//         )?;
+//         Ok(ret)
+//     }
+// }
+
 struct ServerMenu {
     servers: Vec<(String,Server)>,
     status: Vec<(String, Option<Info>)>,
@@ -144,7 +149,7 @@ impl ServerMenu {
                             Some(v) => { format!("[{}/{}]",v.players, v.max_players) }
                             None => { offline_msg.clone() }
                         },
-                        //update status column. optional mods dont strictly need updating - its non-breaking as they're client side only
+                        //update status column. optional mods dont strictly need updating - its non-breaking as they're client side only such as optional mods TODO
                         match config.pending_updates.iter().any(|pu|{
                         servers.iter().find(|x| x.0==*k).unwrap().1.mods.contains(pu)
                         }){
@@ -185,7 +190,7 @@ impl ServerMenu {
             }).collect::<Vec<_>>();
             let mut launch: bool = true;
             if update_list.len()>0 {
-                launch = ui.popup_download(update_list).await?;
+                launch = ui.popup_update(update_list).await?;
                     
             }
             if launch {
@@ -267,7 +272,7 @@ impl OptionalModsMenu {
              if !config.absolute_mod_dir()?.join(&x.0).is_dir() {
                 x.1 = OptionalModsStatus::not_found;
             } Ok(())
-        }).collect::<Result<_,Error>>()?; //collect and propogate error if file_exists fails
+        }).collect::<Result<(),Error>>()?; //collect and propogate error if file_exists fails
         
         self.titles.sort_by(|x,y| x.0.cmp(&y.0));
 
@@ -293,7 +298,7 @@ impl OptionalModsMenu {
             match entry.1{
                 OptionalModsStatus::not_found => {
                     
-                    let join = ui.popup_download(vec![entry.0.clone()]).await;
+                    let join = ui.popup_update(vec![entry.0.clone()]).await;
 
                     match join {
                         Ok(b) => {
@@ -392,8 +397,8 @@ impl TUI {
         });
     }
 
-    //TODO: popups dont have bind to exit
-    pub fn popup_text_entry(&mut self, message: &str) -> String {
+    //returns None if cancelled
+    pub fn popup_text_entry(&mut self, message: &str) -> Option<String> {
         let block = Block::bordered();
 
         // txt.push_line("Press C to cancel".to_line().white());
@@ -405,7 +410,7 @@ impl TUI {
         loop {
             let block = Block::bordered()
                 .title_top(message.clone())
-                .title_bottom("Press Enter to Submit")
+                .title_bottom("[Enter: Submit, Esc: Quit]")
                 .title_alignment(Alignment::Center);
             let panel = Paragraph::new(buf.clone()).block(block);
 
@@ -434,7 +439,7 @@ impl TUI {
                         cur += 1;
                     }
                     KeyCode::Enter => {
-                        return buf;
+                        return Some(buf);
                     }
                     KeyCode::Left => {
                         if cur > 0 {
@@ -457,6 +462,7 @@ impl TUI {
                             buf.remove(cur);
                         }
                     }
+                    KeyCode::Esc => { return None;}
                     _ => {}
                 }
             }
@@ -530,8 +536,8 @@ impl TUI {
     /// popup to wrap download + unzip mod. will remove items from CACConfig->pending_updates after completing update.
     /// # Return:
     /// Returns false if operation cancelled by user.
-    pub async fn popup_download(&mut self, items: Vec<String>) -> Result<bool,Error> {
-        warn!("UI: entered popup_download");
+    pub async fn popup_update(&mut self, items: Vec<String>) -> Result<bool,Error> {
+        warn!("UI: entered popup_update");
 
         let term_size = self.term.size()?;
         let mut progressBuf = ProgressBarBuffer::new(); 
@@ -540,13 +546,13 @@ impl TUI {
         progress.set_length(1); progress.set_position(0);
         progress.set_draw_target(ProgressDrawTarget::term_like(Box::new(progressBuf)));
 
-        let title_buf = Arc::new(Mutex::new(format!("0/{}",items.len())));
+        let title_buf = Arc::new(Mutex::new(format!("Update items: 0/{}",items.len())));
         let _title_buf = title_buf.clone();
         
         let _finish = CancellationToken::new();
         let finish = _finish.clone();
 
-        let join: JoinHandle<Result<(),Error>>  =tokio::spawn(download_items(items, progress, title_buf, finish));
+        let join: JoinHandle<Result<bool,Error>>  =tokio::spawn(download_items(items, progress, title_buf, finish));
 
         let ret = if !self.popup_progress(pbuf, _title_buf,_finish.clone()){
             _finish.cancel();
@@ -555,8 +561,8 @@ impl TUI {
             true
         };
 
-        join.await??; //this error almost got away... JoinError then download error
-        warn!("UI:popup_download ok");
+        join.await??; //this error almost got away... JoinError then download 
+        warn!("UI:popup_update ok");
         self.term.clear();
         Ok(ret)
     }
@@ -587,12 +593,12 @@ impl TUI {
             if event.is_key_press() {
                 return;
             }
-            if event.is_mouse() {
-                let event = event.as_mouse_event().unwrap();
-                if let MouseEventKind::Down(e) = event.kind {
-                    return;
-                }
-            }
+            // if event.is_mouse() {
+            //     let event = event.as_mouse_event().unwrap();
+            //     if let MouseEventKind::Down(e) = event.kind {
+            //         return;
+            //     }
+            // }
         }
         self.term.clear();
     }
@@ -625,7 +631,7 @@ impl TUI {
                 Block::bordered()
                     .border_style(Style::new().green())
                     .title(" CAC Launcher ")
-                    .title_bottom("(keys: \u{2190}/\u{2192}), Esc to quit")
+                    .title_bottom("(keys: \u{2190}/\u{2192}), Esc/Q to quit")
                     .title_alignment(Alignment::Center)
                     .padding(padding)
             )
@@ -700,7 +706,7 @@ impl TUI {
                     tab_select = tab_select.saturating_sub(1);
                 } else if key.code == KeyCode::Right && tab_select < titles.len() - 1 {
                     tab_select += 1;
-                }else if key.code == KeyCode::Esc {
+                }else if key.code == KeyCode::Esc || key.code == KeyCode::Char('q') {
                     return Ok(());
                 } 
 

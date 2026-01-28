@@ -1,0 +1,12 @@
+[package]
+name = "iced-test"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+iced = { version = "0.13.1", features = ["image"] }
+iced_gif = "0.13.0"
+lazy_static = "1.5.0"
+src-backend = {path = "../"}
+strum = "0.27.2"
+strum_macros = "0.27.2"

@@ -1,5 +1,13 @@
+# CAC Launcher
+
 <p align="center">
-    <img src="https://raw.githubusercontent.com/Benkol003/CAC-GUI/master/public/cac_logo_transparent.gif" alt="CAC logo" >
+    <br>
+    <img src="https://raw.githubusercontent.com/Benkol003/CAC-Launcher/master/public/CAC-Launcher.png" alt="CAC logo" >
+</p>
+
+## Discord
+<p align="center">
+    <img src="https://raw.githubusercontent.com/Benkol003/CAC-Launcher/master/public/cac_logo_transparent.gif" alt="CAC logo" >
 </p>
 <p align="center">
     <a href="https://discord.gg/dNGcyEYK8F">

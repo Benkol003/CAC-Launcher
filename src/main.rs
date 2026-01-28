@@ -55,7 +55,6 @@ async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
     let folder_path = TMP_FOLDER.join(regex.captures(fname).unwrap().get(1).unwrap().as_str().to_string());
 
     let new_content = CACContent::read_from(folder_path.join("content.json"))?;
-    let old_content = CACContent::read()?;
 
     let mut config= match CONFIG_FILE.as_path().is_file() {
         false => {
@@ -65,6 +64,18 @@ async fn update_cac_config(tui: &mut TUI) -> Result<(),Error> {
         },
         true => {
             CACConfig::read()?
+        }
+    };
+
+    //TODO choose whether to update everything or not 
+    let old_content = match std::fs::exists(CONTENT_FILE.as_path())? {
+        true => {
+            CACContent::read()?
+        }
+        false => {
+            new_content.save_to(CONTENT_FILE.as_path())?;
+            tui.warn_unknown_mod_state();
+            return Ok(());
         }
     };
 
@@ -115,12 +126,16 @@ struct Args{
     no_update: bool
 }
 
-const LOG_PATH: &'static str = "CAC-Config/CAC-Launcher.log";
-
 #[tokio::main]
 async fn main() {
     std::env::set_var("RUST_BACKTRACE", "1");
-    WriteLogger::init(simplelog::LevelFilter::Warn, simplelog::Config::default(), File::create(LOG_PATH).unwrap()).unwrap();
+
+    //TODO fails if file exists as symlink/file
+    if !std::fs::exists(CONFIG_FOLDER.as_path()).unwrap() {
+        std::fs::create_dir(CONFIG_FOLDER.as_path()).unwrap();
+    }
+
+    WriteLogger::init(simplelog::LevelFilter::Warn, simplelog::Config::default(), File::create(LOG_PATH.as_path()).unwrap()).unwrap();
     let mut tui = TUI::new();
 
     std::panic::set_hook(Box::new(panic_handler));
@@ -131,7 +146,7 @@ async fn main() {
         let bt = e.backtrace();
         log::error!("Error in main: {}", e);
         log::error!("{bt}\n");
-        let el = vec![Line::from(vec!["fatal error: ".light_red(),format!("{}",e).into()]),format!("backtrace has been added to {} ",LOG_PATH).light_yellow().into()];
+        let el = vec![Line::from(vec!["fatal error: ".light_red(),format!("{}",e).into()]),format!("backtrace has been added to {} ",LOG_PATH.display()).light_yellow().into()];
         tui.popup_blocking_prompt(el.into());
         drop(tui);
         std::process::exit(-1);

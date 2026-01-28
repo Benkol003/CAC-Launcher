@@ -1,4 +1,4 @@
-use std::{collections::{HashMap, HashSet}, fs::{File, OpenOptions}, io::Read, path::{self, PathBuf}};
+use std::{collections::{HashMap, HashSet}, fs::{File, OpenOptions}, io::Read, path::{self, Path, PathBuf}};
 use crate::{UI::TUI};
 use anyhow::{anyhow,Error};
 use chrono::format::StrftimeItems;
@@ -8,6 +8,9 @@ use serde::{Deserialize, Serialize};
 
 pub const CONFIG_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
     PathBuf::from("CAC-Config")
+});
+pub const LOG_PATH: Lazy<PathBuf> = Lazy::new(|| {
+    CONFIG_FOLDER.join("CAC-Launcher.log")
 });
 pub const TMP_FOLDER: Lazy<PathBuf> = Lazy::new(|| {
     CONFIG_FOLDER.join("tmp")
@@ -32,11 +35,18 @@ pub const TMP_DOWNLOADS_FILE: Lazy<PathBuf> = Lazy::new(|| {
 
 pub trait Config: Serialize + for<'de> Deserialize<'de> {
     fn file_path() -> PathBuf;
-    fn save(&self) -> Result<(),Error> {
+
+    fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(),Error> {
         let f = OpenOptions::new().truncate(true).write(true).create(true).open(Self::file_path())?;
         serde_json::to_writer_pretty(f, &self)?;
         Ok(())
     }
+
+    fn save(&self) -> Result<(),Error> {
+        Self::save_to(self,Self::file_path())
+    }
+    
+
 
     fn _read(path: PathBuf) -> Result<Self,Error> {
         let mut config_buf = String::new();

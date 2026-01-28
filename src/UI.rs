@@ -17,18 +17,14 @@ use ratatui::{
     Terminal,
 };
 use crossterm::{
-    cursor::SetCursorStyle,
-    event::{ self, read, Event, KeyCode, KeyEvent, KeyEventKind, MouseEventKind },
-    execute,
-    terminal::{disable_raw_mode, Clear},
-    ExecutableCommand,
+    ExecutableCommand, cursor::SetCursorStyle, event::{ self, Event, KeyCode, KeyEvent, KeyEventKind, MouseEventKind, read }, execute, terminal::{Clear, SetTitle, disable_raw_mode}
 };
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 
 use std::cell::{ Cell, RefCell };
 
-use crate::{ClientCtx, LOGO, PROGRESS_STYLE_DOWNLOAD, PROGRESS_STYLE_MESSAGE, configs::{CACConfig, CACContent, Config, Links, TMP_FOLDER}, download::download_items, msgraph, servers::{ self, Server }, unzip};
+use crate::{ClientCtx, LOGO, PROGRESS_STYLE_DOWNLOAD, PROGRESS_STYLE_MESSAGE, TITLE, configs::{CACConfig, CACContent, Config, Links, TMP_FOLDER}, download::download_items, msgraph, servers::{ self, Server }, unzip};
 
 fn center(area: Rect, horizontal: Constraint, vertical: Constraint) -> Rect {
     let [area] = Layout::horizontal([horizontal]).flex(Flex::Center).areas(area);
@@ -356,7 +352,9 @@ pub struct TUI {
 /// UI elements that are aysn
 impl TUI {
     pub fn new() -> Self {
-        std::io::stdout().execute(crossterm::event::EnableMouseCapture).unwrap();
+        execute!(stdout(),crossterm::event::EnableMouseCapture).unwrap();
+        execute!(stdout(),crossterm::terminal::EnterAlternateScreen).unwrap();
+        execute!(stdout(), SetTitle(TITLE)).unwrap();
         let mut term = Terminal::new(CrosstermBackend::new(stdout())).unwrap();
         term.clear();
         TUI {

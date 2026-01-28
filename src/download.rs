@@ -92,8 +92,10 @@ pub async fn download_file(client: Client,
     drop(response);
 
 
-    let mut tmp_manifest = CACDownloadManifest::read()?;
-    tmp_manifest.0.insert(fname.clone(), TmpDownloadID{id: tmp_id.to_string(), etag: etag.clone()});
+    //TODO
+    //also pass option<config> in for tests or edit return
+    //let mut tmp_manifest = CACDownloadManifest::read()?;
+    //tmp_manifest.0.insert(fname.clone(), TmpDownloadID{id: tmp_id.to_string(), etag: etag.clone()});
 
     
     let dest_path = dest_folder.join(fname);

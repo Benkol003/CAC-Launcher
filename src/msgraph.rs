@@ -50,8 +50,8 @@ use reqwest::{
 use crate::download::download_file;
 use crate::{PROGRESS_STYLE_DOWNLOAD, TIMEOUT, final_url, secrets};
 
-const TENANT_ID: &str = "4fd01353-8fd7-4a18-a3a1-7cd70f528afa";
-const APP_CLIENT_ID: &str = "9ecaa0e8-9caf-4f49-94e8-8430bbf57486";
+const TENANT_ID: &str = "e49b9dd1-c246-47a2-8487-0d3d6b6a5ae3";
+const APP_CLIENT_ID: &str = "19bf2428-3178-416d-a169-a62ba28c23fb";
 const MSAPI_URL: &str = "https://graph.microsoft.com/v1.0/";
 //const MSGPRAPH_KEY - place in secrets.rs
 

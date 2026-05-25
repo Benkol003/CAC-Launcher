@@ -58,7 +58,7 @@ async fn main() -> Result<(),Error> {
         let mut file = std::fs::File::open(&path)?;
         let mut content = String::new();
         file.read_to_string(&mut content)?;
-        urls.extend(content.lines().map(|x| x.to_string()));
+        urls.extend(content.lines().filter(|x| !x.trim().is_empty()).map(|x| x.to_string()));
 
     }else if let Some(mut urls_in) = args.args.url {
         urls.append(&mut urls_in);
@@ -118,7 +118,7 @@ async fn main() -> Result<(),Error> {
         //TODO delete the old folder before unzipping if present
         //TODO double check getting archive .000
         
-        unzip(parts.get(0).unwrap().as_os_str().to_str().unwrap(),".",Some(&mut z7_progress))?;
+        unzip(parts.get(0).unwrap().as_os_str().to_str().unwrap(),&args.output_dir,Some(&mut z7_progress))?;
         println!("{}",format!("Extracted {}",&item.1[0].name).bold().green());
 
         //remove archive or all partial archives

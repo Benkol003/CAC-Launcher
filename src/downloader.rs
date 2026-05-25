@@ -13,7 +13,7 @@ use tokio_util::sync::CancellationToken;
 #[command(version, about)]
 struct Args {
 
-    #[arg(short,default_value = "")]
+    #[arg(short,default_value = ".")]
     output_dir: String,
     
     #[clap(flatten)]

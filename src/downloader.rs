@@ -49,7 +49,6 @@ async fn main() -> Result<(),Error> {
 
     let args = Args::parse();
     let ctx = ClientCtx::build()?;
-    let token = msgraph::login(&ctx.client).await?;
     let mut urls: Vec<String> = Vec::new();
     if let Some(path) = args.args.file_url_list {
         if !std::fs::exists(&path)? {
@@ -79,7 +78,7 @@ async fn main() -> Result<(),Error> {
     println!("Fetching link info...");
     let mut tasks = JoinSet::new(); 
     urls.iter().map(|u| Url::parse(u).map_err(|e| anyhow!(e))).collect::<Result<Vec<Url>,Error>>()?
-    .iter().for_each(|u| {tasks.spawn(msgraph::get_shared_drive_item(ctx.client.clone(), token.clone(),u.clone()));});
+    .iter().for_each(|u| {tasks.spawn(msgraph::get_shared_drive_item(ctx.client.clone(),u.clone()));});
     let drive_items: Vec<SharedDriveItem>   = tasks.join_all().await.into_iter().collect::<Result<_,_>>()?;
     let items = group_drive_item_archives(drive_items)?;
 
@@ -99,7 +98,7 @@ async fn main() -> Result<(),Error> {
         let mut parts: Vec<PathBuf> = Vec::new();
         for part in &item.1 {
             let mut progress = ProgressBar::new(0).with_style(ProgressStyle::with_template(PROGRESS_STYLE_DOWNLOAD)?);//TODO static assert usize::MAX<= u64::MAX
-            let p =msgraph::download_item(ctx.client.clone(),token.clone(), part.clone(), args.output_dir.clone(),&mut progress, shutdown.clone()).await?;
+            let p =msgraph::download_item(ctx.client.clone(), part.clone(), args.output_dir.clone(),&mut progress, shutdown.clone()).await?;
             let part = match p {
                 Some(p) => p,
                 None => {

@@ -5,7 +5,7 @@ use log::info;
 use reqwest::header::{self, HeaderMap};
 use serde_json::to_string_pretty;
 use simplelog::WriteLogger;
-use src_backend::{ClientCtx, TIMEOUT, configs::{CACDownloadManifest, Config, TMP_DOWNLOADS_FILE}, msgraph::login};
+use src_backend::{ClientCtx, TIMEOUT, configs::{CACDownloadManifest, Config, TMP_DOWNLOADS_FILE}, msgraph::token};
 
 const MSAPI_URL: &str = "https://graph.microsoft.com/v1.0/";
 
@@ -22,10 +22,9 @@ async fn main() -> Result<(),Box<dyn Error>> {
     WriteLogger::init(simplelog::LevelFilter::Info, simplelog::Config::default(), File::create("CAC-test-main.log").unwrap()).unwrap();
 
     let ctx = ClientCtx::build()?;
-    let token = login(&ctx.client).await?;
 
     let mut headers = HeaderMap::new();
-    headers.append(header::AUTHORIZATION, format!("Bearer {}", token).parse()?);
+    headers.append(header::AUTHORIZATION, format!("Bearer {}", token(&ctx.client).await?.access_token).parse()?);
     headers.append(header::CONTENT_TYPE, "application/json".parse()?);
 
     

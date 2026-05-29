@@ -8,11 +8,14 @@ use anyhow::{anyhow, Error};
 use futures_util::TryStreamExt;
 use indicatif::{ProgressBar, ProgressStyle};
 use log::warn;
+use once_cell::sync::OnceCell;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::map::Entry;
+use tokio::sync::{Mutex, RwLock};
 use std::clone;
 use std::fmt::Display;
+use std::time::SystemTime;
 use std::{
     collections::HashMap,
     fmt::Debug,
@@ -56,12 +59,15 @@ const MSAPI_URL: &str = "https://graph.microsoft.com/v1.0/";
 //const MSGPRAPH_KEY - place in secrets.rs
 
 ///[msgraph reference](https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token)
-#[derive(Deserialize)]
-pub struct TokenResponse {
+#[derive(Deserialize,Clone,Debug)]
+pub struct Token {
     pub token_type: String,
     pub expires_in: usize,
     pub ext_expires_in: usize,
     pub access_token: String,
+
+    #[serde(skip, default = "std::time::SystemTime::now")]
+    pub obtained_at: SystemTime
 }
 
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/resources/driveitem?view=graph-rest-1.0)
@@ -117,44 +123,6 @@ async fn get_encoded_sharing_url(client: &Client, url: Url) -> Result<String, Er
     return Ok(format!("u!{}", BASE64_URL_SAFE_NO_PAD.encode(final_url)));
 }
 
-// //trait specialisations are unstabale atm
-// //https://github.com/rust-lang/rust/issues/31844
-
-// #[derive(Debug)]
-// enum MsGraphError {
-//     GenericError(Box<dyn std::error::Error + Send + Sync>),
-//     ReqwestError(reqwest::Error)
-// }
-
-// impl From<anyhow::Error> for MsGraphError {
-//     fn from(value: anyhow::Error) -> Self {
-//         Self::GenericError(value.into_boxed_dyn_error())
-//     }
-// }
-// impl From<Box<dyn std::error::Error + Send + Sync + 'static>> for MsGraphError {
-//     fn from(value: Box<dyn std::error::Error +  Send + Sync + 'static>) -> Self {
-//         Self::GenericError(value)
-//     }
-// }
-
-// // impl From<Box<dyn std::error::Error + Send + Sync>> for MsGraphError {
-// //     fn from(value: Box<dyn std::error::Error + Send + Sync>) -> Self {
-// //         Self::GenericError(value)
-// //     }
-// // }
-
-// impl From<reqwest::Error> for MsGraphError {
-//  fn from(value: reqwest::Error) -> Self {
-//      Self::ReqwestError(value)
-//  }
-// }
-
-// impl From<InvalidHeaderValue> for MsGraphError {
-//     fn from(value: InvalidHeaderValue) -> Self {
-//         Self::GenericError(value.into())
-//     }
-// }
-
 #[derive(thiserror::Error, Debug)]
 pub enum MsGraphError {
     #[error("{0}")]
@@ -183,7 +151,6 @@ pub fn is_sharepoint_link(url: &str) -> Result<bool, Error> {
 /// [msgraph reference](https://learn.microsoft.com/en-us/graph/api/shares-get?view=graph-rest-1.0&tabs=http)
 pub async fn get_shared_drive_item(
     client: Client,
-    token: String,
     url: Url,
 ) -> Result<SharedDriveItem, MsGraphError> {
     let client = reqwest::Client::new(); //TODO use client ctx instead
@@ -191,7 +158,7 @@ pub async fn get_shared_drive_item(
 
     let share_id = get_encoded_sharing_url(&client, url).await?;
     let mut headers = HeaderMap::new();
-    headers.append(header::AUTHORIZATION, format!("Bearer {}", token).parse()?);
+    headers.append(header::AUTHORIZATION, format!("Bearer {}", token(&client).await?.access_token).parse()?);
     headers.append(header::CONTENT_TYPE, "application/json".parse()?);
     headers.append("prefer", "redeemSharingLink".parse()?);
     let mut response = client
@@ -228,7 +195,6 @@ pub struct DownloadRequest {
 /// TODO: if there is a folder with the same name as the download file...
 pub async fn download_item(
     client: Client,
-    token: String,
     item: SharedDriveItem,
     dest_folder: String,
     progress: &mut ProgressBar,
@@ -243,16 +209,41 @@ pub async fn download_item(
     /////// build msgraph request /////////
 
     let mut headers = HeaderMap::new();
-    headers.append(header::AUTHORIZATION, format!("Bearer {}", token).parse()?);
+    headers.append(header::AUTHORIZATION, format!("Bearer {}", token(&client).await?.access_token).parse()?);
     let dest_url = Url::parse(format!("{}shares/{}/driveItem/content",MSAPI_URL, item.share_id).as_str())?;
 
     
     download_file(client,item.name,dest_url,Some(headers),dest_folder,progress,item.id.as_str(),cancel).await
 }
 
+static TOKEN: Mutex<Option<Token>> = Mutex::const_new(None);
+
+
+//returns a globally maintained instance of the app token, requests a new token 
+//if the new one has expired.
+pub async fn token(client: &Client) -> Result<Token, Error> {
+    let mut guard = TOKEN.lock().await;
+    let token = match guard.as_ref() {
+        None => {
+            let t = obtain_token(client).await?; *guard = Some(t.clone()); t
+        },
+        Some(t) => {
+            let lived = SystemTime::now().duration_since(t.obtained_at)?;
+            //refresh token early to prevent race condition
+            if (lived.as_secs() as usize) > (t.expires_in - 60) {
+                let t = obtain_token(client).await?; *guard = Some(t.clone()); t
+            } else {
+                t.clone()
+            }
+        }
+    };
+    Ok(token)
+}
+
+
 ///[msgraph reference](https://login.microsoftonline.com/{TENANT_ID}/oauth2/v2.0/token)\
 /// returns an access that can be used with other MSGraph API endpoints
-pub async fn login(client: &Client) -> Result<String, Error> {
+pub async fn obtain_token(client: &Client) -> Result<Token, Error> {
     let mut params = HashMap::new();
     params.insert("client_id", APP_CLIENT_ID);
     params.insert("scope", "https://graph.microsoft.com/.default");
@@ -271,8 +262,8 @@ pub async fn login(client: &Client) -> Result<String, Error> {
         .await?;
 
     if response.status().is_success() {
-        let json: TokenResponse = response.json().await?;
-        return Ok(json.access_token);
+        let json: Token = response.json().await?;
+        return Ok(json);
     } else {
         return Err(anyhow!(
             "failed to get access token. status code: {}",

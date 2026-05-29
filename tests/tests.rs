@@ -17,7 +17,7 @@ mod tests {
 
     use super::*;
 
-    const MOD_LINK: &str = "https://tinyurl.com/3f3tp9x4"; //@CBA_A3
+    const MOD_LINK: &str = "https://tinyurl.com/567kx3mc"; //@CBA_A3
 
     //const MOD_LINK_MULTIPART_FOLDER: &str = "???"; //multipart mods arent in a folder atm
     // #[tokio::test]
@@ -49,11 +49,10 @@ mod tests {
     #[tokio::test]
     async fn msgraph_download() -> Result<(), Error> {
         let client_ctx = ClientCtx::build()?;
-        let token = msgraph::login(&client_ctx.client).await?;
         let url=Url::parse(MOD_LINK)?;
-        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), url).await?;
+        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), url).await?;
         let mut bar =ProgressBar::new(0);
-        msgraph::download_item(client_ctx.client.clone(), token.clone(),item.clone(),tmp_dir()?.to_string(),&mut bar, CancellationToken::new()).await?;
+        msgraph::download_item(client_ctx.client.clone(),item.clone(),tmp_dir()?.to_string(),&mut bar, CancellationToken::new()).await?;
         Ok(())
     }
 
@@ -66,8 +65,7 @@ mod tests {
         let new_url = response.url();
         println!("final url: {}", new_url);
 
-        let token = msgraph::login(&client_ctx.client).await?;
-        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), new_url.clone()).await?;
+        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), new_url.clone()).await?;
         println!("item:\n{:?}", item);
 
         Ok(())
@@ -78,8 +76,7 @@ mod tests {
         //CBA_A3 direct download link
         let url = Url::parse(MOD_LINK)?;
         let client_ctx = ClientCtx::build()?;
-        let token = msgraph::login(&client_ctx.client).await?;
-        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(), url).await?;
+        let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), url).await?;
         println!("item:\n{:?}", item);
         if let FsEntryType::Folder { child_count: _ } = item.item {
             panic!("shared drive item is folder not file");

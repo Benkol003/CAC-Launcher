@@ -181,7 +181,6 @@ pub async fn download_file(client: Client,
 async fn di(items: Vec<String>,progress: &mut ProgressBar, title_buf: Arc<Mutex<String>>, finish: &CancellationToken) -> Result<bool,Error>{
             let mut config = CACConfig::read()?;
             let client_ctx = ClientCtx::build()?; //TODO initialise elsewhere
-            let token = msgraph::login(&client_ctx.client).await?;
 
             //TODO indicate on n/total items
 
@@ -211,8 +210,8 @@ async fn di(items: Vec<String>,progress: &mut ProgressBar, title_buf: Arc<Mutex<
                             warn!("link: {}",link);
                             let optfile = match msgraph::is_sharepoint_link(&final_url.authority())? {
                                 true => {
-                                    let item = msgraph::get_shared_drive_item(client_ctx.client.clone(), token.clone(),link_url).await?;
-                                    msgraph::download_item(client_ctx.client.clone(), token.clone(),item, TMP_FOLDER.display().to_string(), progress, finish.clone()).await?
+                                    let item = msgraph::get_shared_drive_item(client_ctx.client.clone(),link_url).await?;
+                                    msgraph::download_item(client_ctx.client.clone(),item, TMP_FOLDER.display().to_string(), progress, finish.clone()).await?
                                     
                                 }
                                 false => {
